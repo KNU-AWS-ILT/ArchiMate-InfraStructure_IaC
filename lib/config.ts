@@ -15,6 +15,13 @@ export const TAG_OWNER = 'infra';
 export const DEFAULT_STAGE = 'demo';
 
 /**
+ * DynamoDB TTL 속성 이름 (임시값).
+ * 백엔드 #12 결정 대기: 속성 이름과 designs 보관 기간이 정해지면 이 값만 바꾼다. (Task.md Q5)
+ * 현재는 `explanations` 테이블에만 적용한다.
+ */
+export const TTL_ATTRIBUTE_NAME = 'expiresAt';
+
+/**
  * Bedrock 모델 ID (임시값).
  * 서울 리전에서 직접 호출되는지, `apac.` 같은 추론 프로필이 필요한지 백엔드(AI)에 확인 중이다. (Task.md Q3)
  */
@@ -28,6 +35,8 @@ export interface ArchimateConfig {
   /** 스테이지 이름. 리소스 이름과 Environment 태그에 쓰인다. */
   readonly stage: string;
   readonly monthlyBudgetUsd: number;
+  /** DynamoDB TTL 속성 이름. 백엔드 #12 결정 대기 (임시값) */
+  readonly ttlAttributeName: string;
   /** Budgets 알림 이메일 (`-c alertEmail=...`). Budgets를 만들 때 필수로 바꾼다. */
   readonly alertEmail?: string;
   /** 백엔드 레포 절대 경로 (`-c backendPath=...`) */
@@ -60,6 +69,7 @@ export function loadConfig(app: App): ArchimateConfig {
     region: REGION,
     stage,
     monthlyBudgetUsd: MONTHLY_BUDGET_USD,
+    ttlAttributeName: TTL_ATTRIBUTE_NAME,
     alertEmail: readString(app, 'alertEmail'),
     backendPath: path.resolve(readString(app, 'backendPath') ?? '../ArchiMate-Backend'),
     webAssetPath: path.resolve(readString(app, 'webAssetPath') ?? '../ArchiMate-Frontend/out'),

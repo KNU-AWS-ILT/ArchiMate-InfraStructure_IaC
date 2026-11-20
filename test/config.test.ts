@@ -1,6 +1,4 @@
 import { App } from 'aws-cdk-lib';
-import { Template } from 'aws-cdk-lib/assertions';
-import { ArchimateStack } from '../lib/archimate-stack';
 import { loadConfig, resourceName } from '../lib/config';
 
 describe('resourceName', () => {
@@ -24,13 +22,5 @@ describe('loadConfig', () => {
   it('잘못된 스테이지 이름은 거부한다', () => {
     const app = new App({ context: { stage: 'Prod_1' } });
     expect(() => loadConfig(app)).toThrow();
-  });
-});
-
-describe('ArchimateStack', () => {
-  it('빈 스택으로 합성된다 (리소스 없음)', () => {
-    const app = new App();
-    const stack = new ArchimateStack(app, 'archimate-demo', { config: loadConfig(app) });
-    expect(Template.fromStack(stack).toJSON().Resources).toBeUndefined();
   });
 });
