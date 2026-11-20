@@ -8,7 +8,7 @@ export interface DataTablesProps {
 }
 
 /**
- * 데이터: DynamoDB 테이블 3개. (Task.md 0장, 백엔드 README, 고도화 문서 3장)
+ * 데이터: DynamoDB 테이블 3개. (근거: 백엔드 README 데이터베이스 구조 표(feat/#8-interview-validation 브랜치), 백엔드 #7)
  *
  * 공통: 온디맨드, 삭제 정책 DESTROY.
  * 발표 직후 `cdk destroy` 한 번으로 테이블이 남지 않게 한다. (RETAIN이면 남아서 비용 발생)
