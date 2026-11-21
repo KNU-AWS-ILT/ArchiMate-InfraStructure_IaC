@@ -1,5 +1,5 @@
 import { App } from 'aws-cdk-lib';
-import { Match, Template } from 'aws-cdk-lib/assertions';
+import { Template } from 'aws-cdk-lib/assertions';
 import { ArchimateStack } from '../lib/archimate-stack';
 import { loadConfig } from '../lib/config';
 
@@ -71,18 +71,27 @@ function statementsWithAction(functionName: string, prefix: string): Json[] {
 }
 
 describe('Lambda 3개 공통 설정', () => {
+  // S3 자동 삭제·파일 업로드용 도우미 Lambda(CDK가 만듦)는 이름이 없어서 제외하고, 우리가 만든 함수만 본다.
+  const ourFunctions = (): Json[] =>
+    (Object.values(template.findResources('AWS::Lambda::Function')) as Json[]).filter(
+      (r) => r.Properties.FunctionName,
+    );
+
   it('함수는 3개이고 이름은 resourceName 규칙이다', () => {
-    template.resourceCountIs('AWS::Lambda::Function', 3);
+    expect(ourFunctions().map((r) => r.Properties.FunctionName).sort()).toEqual(
+      [EXPLAIN, GENERATE, SYNC_PRICES].sort(),
+    );
     for (const name of [GENERATE, EXPLAIN, SYNC_PRICES]) {
       expect(functionByName(name)).toBeDefined();
     }
   });
 
   it('Python 3.12, ARM64이다', () => {
-    template.allResourcesProperties('AWS::Lambda::Function', {
-      Runtime: 'python3.12',
-      Architectures: ['arm64'],
-    });
+    expect(ourFunctions()).toHaveLength(3);
+    for (const fn of ourFunctions()) {
+      expect(fn.Properties.Runtime).toBe('python3.12');
+      expect(fn.Properties.Architectures).toEqual(['arm64']);
+    }
   });
 
   it('진입 함수는 백엔드 #15 확정 경로다', () => {
@@ -94,7 +103,10 @@ describe('Lambda 3개 공통 설정', () => {
   });
 
   it('로그 보존 2주(14일), 삭제 정책 DESTROY', () => {
-    template.resourceCountIs('AWS::Logs::LogGroup', 3);
+    const named = (Object.values(template.findResources('AWS::Logs::LogGroup')) as Json[]).filter(
+      (g) => typeof g.Properties.LogGroupName === 'string' && g.Properties.LogGroupName.startsWith('/aws/lambda/archimate-'),
+    );
+    expect(named).toHaveLength(3);
     for (const name of [GENERATE, EXPLAIN, SYNC_PRICES]) {
       const groups = Object.values(
         template.findResources('AWS::Logs::LogGroup', { Properties: { LogGroupName: `/aws/lambda/${name}` } }),
@@ -106,13 +118,16 @@ describe('Lambda 3개 공통 설정', () => {
   });
 
   it('태그 3종이 붙는다', () => {
-    template.allResourcesProperties('AWS::Lambda::Function', {
-      Tags: Match.arrayWith([
-        { Key: 'Environment', Value: 'demo' },
-        { Key: 'Owner', Value: 'infra' },
-        { Key: 'Project', Value: 'ArchiMate' },
-      ]),
-    });
+    expect(ourFunctions()).toHaveLength(3);
+    for (const fn of ourFunctions()) {
+      expect(fn.Properties.Tags).toEqual(
+        expect.arrayContaining([
+          { Key: 'Environment', Value: 'demo' },
+          { Key: 'Owner', Value: 'infra' },
+          { Key: 'Project', Value: 'ArchiMate' },
+        ]),
+      );
+    }
   });
 
   it('EventBridge 스케줄은 아직 없다 (3-6단계)', () => {

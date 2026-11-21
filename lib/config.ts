@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { App } from 'aws-cdk-lib';
 
@@ -77,6 +78,9 @@ export type LambdaCodeSource = 'stub' | 'backend';
 /** IaC 레포 안의 더미 핸들러 폴더. 백엔드 코드가 main에 올라오기 전까지 쓴다. */
 export const LAMBDA_STUB_PATH = path.resolve(__dirname, '..', 'lambda-stub');
 
+/** 프론트 결과물(index.html)이 없을 때 올리는 플레이스홀더 페이지 폴더 */
+export const WEB_PLACEHOLDER_PATH = path.resolve(__dirname, '..', 'web-placeholder');
+
 export interface ArchimateConfig {
   readonly region: string;
   /** 스테이지 이름. 리소스 이름과 Environment 태그에 쓰인다. */
@@ -90,6 +94,11 @@ export interface ArchimateConfig {
   readonly backendPath: string;
   /** 프론트 정적 내보내기 결과물 절대 경로 (`-c webAssetPath=...`) */
   readonly webAssetPath: string;
+  /**
+   * 실제로 S3에 올릴 폴더. `webAssetPath`에 index.html이 있으면 그 폴더,
+   * 없으면 레포 안의 플레이스홀더(`web-placeholder/`)다.
+   */
+  readonly webSourcePath: string;
   readonly bedrockModelIds: typeof BEDROCK_MODEL_IDS;
   /** Lambda 코드 출처 (`-c lambdaCode=stub|backend`, 기본 stub) */
   readonly lambdaCodeSource: LambdaCodeSource;
@@ -125,6 +134,7 @@ export function loadConfig(app: App): ArchimateConfig {
     throw new Error(`lambdaCode "${lambdaCodeSource}"는 stub 또는 backend만 쓸 수 있습니다.`);
   }
   const backendPath = path.resolve(readString(app, 'backendPath') ?? '../ArchiMate-Backend');
+  const webAssetPath = path.resolve(readString(app, 'webAssetPath') ?? '../ArchiMate-Frontend/out');
 
   return {
     region: REGION,
@@ -133,7 +143,8 @@ export function loadConfig(app: App): ArchimateConfig {
     ttlAttributeName: TTL_ATTRIBUTE_NAME,
     alertEmail: readString(app, 'alertEmail'),
     backendPath,
-    webAssetPath: path.resolve(readString(app, 'webAssetPath') ?? '../ArchiMate-Frontend/out'),
+    webAssetPath,
+    webSourcePath: fs.existsSync(path.join(webAssetPath, 'index.html')) ? webAssetPath : WEB_PLACEHOLDER_PATH,
     bedrockModelIds: BEDROCK_MODEL_IDS,
     lambdaCodeSource,
     lambdaCodePath: lambdaCodeSource === 'backend' ? path.join(backendPath, 'src') : LAMBDA_STUB_PATH,

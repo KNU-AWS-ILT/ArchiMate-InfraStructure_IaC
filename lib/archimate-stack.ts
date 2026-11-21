@@ -5,6 +5,7 @@ import { ArchimateConfig, TAG_OWNER, TAG_PROJECT } from './config';
 import { Api } from './api';
 import { DataTables } from './data';
 import { Functions } from './functions';
+import { Web, addWebOutputs } from './web';
 
 export interface ArchimateStackProps extends StackProps {
   readonly config: ArchimateConfig;
@@ -12,7 +13,7 @@ export interface ArchimateStackProps extends StackProps {
 
 /**
  * ArchiMate 서버리스 스택.
- * 지금은 DynamoDB 3개, Cognito, Lambda 3개, API Gateway가 있다. CloudFront·EventBridge·Budgets는 다음 단계에서 추가한다.
+ * 지금은 DynamoDB 3개, Cognito, Lambda 3개, API Gateway, S3 + CloudFront가 있다. EventBridge·Budgets는 다음 단계에서 추가한다.
  */
 export class ArchimateStack extends Stack {
   /** Lambda에 권한과 테이블 이름을 넘길 때 쓴다 (3-3단계) */
@@ -23,6 +24,7 @@ export class ArchimateStack extends Stack {
   public readonly functions: Functions;
   /** CloudFront `/api/*` 동작의 오리진으로 연결할 때 쓴다 (3-5단계) */
   public readonly api: Api;
+  public readonly web: Web;
 
   constructor(scope: Construct, id: string, props: ArchimateStackProps) {
     super(scope, id, props);
@@ -31,6 +33,8 @@ export class ArchimateStack extends Stack {
     this.auth = new Auth(this, 'Auth', { config: props.config });
     this.functions = new Functions(this, 'Functions', { config: props.config, data: this.data });
     this.api = new Api(this, 'Api', { config: props.config, auth: this.auth, functions: this.functions });
+    this.web = new Web(this, 'Web', { config: props.config, api: this.api });
+    addWebOutputs(this, this.web);
 
     // 프론트에 전달하는 공개 값. 출력 이름은 camelCase. (프론트 전달 방식은 협의 필요, Task.md 3-3)
     new CfnOutput(this, 'userPoolId', {

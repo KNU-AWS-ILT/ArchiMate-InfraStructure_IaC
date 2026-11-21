@@ -230,8 +230,3 @@ describe('게이트웨이 응답 (API Gateway가 직접 보내는 오류)', () =
   });
 });
 
-describe('3-5 이전 범위', () => {
-  it('CloudFront는 아직 없다', () => {
-    template.resourceCountIs('AWS::CloudFront::Distribution', 0);
-  });
-});
