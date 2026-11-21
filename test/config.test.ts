@@ -27,6 +27,32 @@ describe('loadConfig', () => {
     expect(() => loadConfig(app)).toThrow();
   });
 
+  it('LLM 제공자 기본값은 bedrock이다', () => {
+    expect(loadConfig(new App()).llmProvider).toBe('bedrock');
+  });
+
+  it('-c llmProvider=mock으로 바꿀 수 있다', () => {
+    expect(loadConfig(new App({ context: { llmProvider: 'mock' } })).llmProvider).toBe('mock');
+  });
+
+  it('llmProvider에 bedrock·mock 외의 값은 거부한다', () => {
+    expect(() => loadConfig(new App({ context: { llmProvider: 'gemini' } }))).toThrow();
+  });
+
+  it('Bedrock 모델 ID는 추론 프로필과 파운데이션 모델이 짝을 이룬다 (백엔드 #15·#22)', () => {
+    const config = loadConfig(new App());
+    expect(config.bedrockModelIds).toEqual({
+      design: 'global.anthropic.claude-opus-5-5',
+      explain: 'global.anthropic.claude-haiku-5-5',
+    });
+    expect(config.bedrockFoundationModelIds).toEqual({
+      design: 'anthropic.claude-opus-5-5',
+      explain: 'anthropic.claude-haiku-5-5',
+    });
+    expect(config.bedrockModelIds.design).toBe(`global.${config.bedrockFoundationModelIds.design}`);
+    expect(config.bedrockModelIds.explain).toBe(`global.${config.bedrockFoundationModelIds.explain}`);
+  });
+
   it('Lambda 코드는 기본으로 더미(lambda-stub)를 쓴다', () => {
     const config = loadConfig(new App());
     expect(config.lambdaCodeSource).toBe('stub');

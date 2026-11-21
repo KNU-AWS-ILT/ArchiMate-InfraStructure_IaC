@@ -66,6 +66,7 @@ export class Functions extends Construct {
     };
 
     // 설계 생성: 환경 변수 LLM_PROVIDER, LLM_MODEL
+    // 기한 관련 환경 변수(LLM_GENERATION_DEADLINE_S 등)는 넣지 않는다. 백엔드 기본값을 쓴다. (백엔드 #15)
     this.generate = createFunction(
       'Generate',
       'generate',
@@ -136,11 +137,21 @@ export class Functions extends Construct {
       }),
     );
 
-    // Bedrock 호출 권한. 리소스 범위는 config의 임시 모델 ID로 좁혔다.
-    // syd348 회신 대기: 서울 리전에서 직접 호출되는지, `apac.` 같은 추론 프로필 ARN이 필요한지 정해지면 범위를 고친다.
-    const modelArn = (modelId: string): string =>
+    // Bedrock 호출 권한. Lambda마다 두 곳만 허용하고 와일드카드는 쓰지 않는다. (백엔드 #15·#22 확정)
+    //  1) 추론 프로필: 서울 리전, 이 계정의 `global.` 프로필 (예: .../inference-profile/global.anthropic.claude-opus-5-5)
+    //  2) 파운데이션 모델: 리전과 계정이 빈 ARN (예: arn:aws:bedrock:::foundation-model/anthropic.claude-opus-5-5)
+    // 배포 전 확인 필요: 실제 ID와 권한은 `list-inference-profiles`로 확인한다. 호출이 권한 오류로 거절되면 이 두 ARN부터 본다.
+    const inferenceProfileArn = (profileId: string): string =>
       Stack.of(this).formatArn({
         service: 'bedrock',
+        resource: 'inference-profile',
+        resourceName: profileId,
+        arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
+      });
+    const foundationModelArn = (modelId: string): string =>
+      Stack.of(this).formatArn({
+        service: 'bedrock',
+        region: '',
         account: '',
         resource: 'foundation-model',
         resourceName: modelId,
@@ -150,13 +161,19 @@ export class Functions extends Construct {
     this.generate.addToRolePolicy(
       new PolicyStatement({
         actions: bedrockActions,
-        resources: [modelArn(config.bedrockModelIds.design)],
+        resources: [
+          inferenceProfileArn(config.bedrockModelIds.design),
+          foundationModelArn(config.bedrockFoundationModelIds.design),
+        ],
       }),
     );
     this.explain.addToRolePolicy(
       new PolicyStatement({
         actions: bedrockActions,
-        resources: [modelArn(config.bedrockModelIds.explain)],
+        resources: [
+          inferenceProfileArn(config.bedrockModelIds.explain),
+          foundationModelArn(config.bedrockFoundationModelIds.explain),
+        ],
       }),
     );
   }

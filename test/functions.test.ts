@@ -158,8 +158,8 @@ describe('제한 시간', () => {
 describe('환경 변수', () => {
   const variables = (name: string): Json => functionByName(name).resource.Properties.Environment.Variables;
 
-  it('explain에 LLM_EXPLAIN_MODEL이 있다', () => {
-    expect(variables(EXPLAIN).LLM_EXPLAIN_MODEL).toBe('anthropic.claude-haiku-5-5');
+  it('explain에 LLM_EXPLAIN_MODEL이 있다 (추론 프로필 ID, 백엔드 #15·#22)', () => {
+    expect(variables(EXPLAIN).LLM_EXPLAIN_MODEL).toBe('global.anthropic.claude-haiku-5-5');
   });
 
   it('각 Lambda에는 필요한 환경 변수만 있다', () => {
@@ -183,9 +183,29 @@ describe('환경 변수', () => {
     expect(variables(SYNC_PRICES).PRICES_TABLE).toEqual({ Ref: prices });
   });
 
-  it('LLM_PROVIDER와 LLM_MODEL은 config 값이다', () => {
+  it('LLM_PROVIDER 기본값은 bedrock, LLM_MODEL은 추론 프로필 ID다 (백엔드 #15·#22)', () => {
     expect(variables(GENERATE).LLM_PROVIDER).toBe('bedrock');
-    expect(variables(GENERATE).LLM_MODEL).toBe('anthropic.claude-opus-5-5');
+    expect(variables(GENERATE).LLM_MODEL).toBe('global.anthropic.claude-opus-5-5');
+    expect(variables(EXPLAIN).LLM_PROVIDER).toBe('bedrock');
+  });
+
+  it('-c llmProvider=mock으로 바꾸면 generate·explain의 LLM_PROVIDER가 mock이다', () => {
+    const mock = synth({ llmProvider: 'mock' });
+    for (const name of [GENERATE, EXPLAIN]) {
+      const found = Object.values(mock.findResources('AWS::Lambda::Function', { Properties: { FunctionName: name } }));
+      expect((found[0] as Json).Properties.Environment.Variables.LLM_PROVIDER).toBe('mock');
+    }
+    // 모델 ID는 그대로다
+    const generate = Object.values(
+      mock.findResources('AWS::Lambda::Function', { Properties: { FunctionName: GENERATE } }),
+    )[0] as Json;
+    expect(generate.Properties.Environment.Variables.LLM_MODEL).toBe('global.anthropic.claude-opus-5-5');
+  });
+
+  it('기한 환경 변수(LLM_GENERATION_DEADLINE_S 등)는 넣지 않는다 (백엔드 기본값 사용)', () => {
+    for (const name of [GENERATE, EXPLAIN, SYNC_PRICES]) {
+      expect(Object.keys(variables(name)).filter((key) => /DEADLINE|TIMEOUT/.test(key))).toEqual([]);
+    }
   });
 });
 
@@ -234,28 +254,47 @@ describe('테이블 권한표', () => {
 });
 
 /**
- * 리소스가 지정한 파운데이션 모델 ARN 하나뿐이고 와일드카드가 없는지 확인한다.
- * 파티션이 토큰으로 합성될 수 있어 ARN 전체 문자열 대신 구성 요소로 검사한다.
+ * Bedrock 문장이 두 곳(추론 프로필, 파운데이션 모델)만 허용하고 와일드카드가 없는지 확인한다.
+ * 테스트의 스택은 리전·계정·파티션이 토큰이라, ARN 전체 문자열 대신 구성 요소로 검사한다.
+ *  - 추론 프로필: 리전은 스택 리전, 계정은 이 계정, 이름은 정확히 `profileId`
+ *  - 파운데이션 모델: 리전과 계정이 비어 있다(`:bedrock:::`), 이름은 정확히 `modelId`
  */
-function expectOnlyModel(resource: unknown, modelId: string): void {
-  expect(Array.isArray(resource)).toBe(false);
-  const text = JSON.stringify(resource);
-  expect(text).toContain(`:bedrock:`);
-  expect(text).toContain(`::foundation-model/${modelId}"`);
-  expect(text).not.toContain('*');
+function expectBedrockStatement(statement: Json, profileId: string, modelId: string): void {
+  expect(asList(statement.Action).sort()).toEqual(['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream']);
+  expect(Array.isArray(statement.Resource)).toBe(true);
+  const resources = (statement.Resource as unknown[]).map((r) => JSON.stringify(r));
+  expect(resources).toHaveLength(2);
+
+  const profile = resources.filter((r) => r.includes(':inference-profile/'));
+  const foundation = resources.filter((r) => r.includes(':foundation-model/'));
+  expect(profile).toHaveLength(1);
+  expect(foundation).toHaveLength(1);
+
+  expect(profile[0]).toContain('"Ref":"AWS::AccountId"');
+  // ID 뒤에 다른 글자가 붙지 않아야 한다. (문자열 하나이거나 Fn::Join의 마지막 조각)
+  const endsWith = (text: string, tail: string): boolean => new RegExp(`${tail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"(\\]\\]\\})?$`).test(text);
+  expect(endsWith(profile[0], `:inference-profile/${profileId}`)).toBe(true);
+  expect(foundation[0]).toContain(`:bedrock:::foundation-model/${modelId}"`);
+  expect(endsWith(foundation[0], `:bedrock:::foundation-model/${modelId}`)).toBe(true);
+
+  for (const resource of resources) {
+    expect(resource).not.toContain('*');
+  }
 }
 
 describe('Bedrock·Price List 권한', () => {
-  it('generate는 설계용 모델만 호출할 수 있다 (범위는 syd348 회신 대기)', () => {
+  it('generate는 설계용 모델 두 곳(추론 프로필, 파운데이션 모델)만 호출할 수 있다 (백엔드 #15·#22)', () => {
     const bedrock = statementsWithAction(GENERATE, 'bedrock:');
     expect(bedrock).toHaveLength(1);
-    expectOnlyModel(bedrock[0].Resource, 'anthropic.claude-opus-5-5');
+    expectBedrockStatement(bedrock[0], 'global.anthropic.claude-opus-5-5', 'anthropic.claude-opus-5-5');
+    expect(JSON.stringify(bedrock[0])).not.toContain('haiku');
   });
 
-  it('explain은 소형 모델만 호출할 수 있다', () => {
+  it('explain은 소형 모델 두 곳만 호출할 수 있다 (백엔드 #15·#22)', () => {
     const bedrock = statementsWithAction(EXPLAIN, 'bedrock:');
     expect(bedrock).toHaveLength(1);
-    expectOnlyModel(bedrock[0].Resource, 'anthropic.claude-haiku-5-5');
+    expectBedrockStatement(bedrock[0], 'global.anthropic.claude-haiku-5-5', 'anthropic.claude-haiku-5-5');
+    expect(JSON.stringify(bedrock[0])).not.toContain('opus');
   });
 
   it('sync_prices에는 Bedrock 권한이 없다', () => {

@@ -22,10 +22,19 @@ export const DEFAULT_STAGE = 'demo';
 export const TTL_ATTRIBUTE_NAME = 'expiresAt';
 
 /**
- * Bedrock 모델 ID (임시값).
- * 서울 리전에서 직접 호출되는지, `apac.` 같은 추론 프로필이 필요한지 백엔드(AI)에 확인 중이다. (Task.md Q3)
+ * Bedrock 추론 프로필 ID. 백엔드 #15·#22 확정. Lambda 환경 변수(`LLM_MODEL`, `LLM_EXPLAIN_MODEL`)에 그대로 들어간다.
+ * 배포 전 확인 필요: 실제 ID는 `aws bedrock list-inference-profiles --region ap-northeast-2`로 확인한다. (MVP_Task.md 7단계)
  */
 export const BEDROCK_MODEL_IDS = {
+  design: 'global.anthropic.claude-opus-5-5',
+  explain: 'global.anthropic.claude-haiku-5-5',
+} as const;
+
+/**
+ * 위 추론 프로필이 가리키는 파운데이션 모델 ID (`global.` 접두사 없음). IAM 권한 범위에 쓴다. 백엔드 #15·#22 확정.
+ * 배포 전 확인 필요: 위 추론 프로필 ID와 함께 확인한다.
+ */
+export const BEDROCK_FOUNDATION_MODEL_IDS = {
   design: 'anthropic.claude-opus-5-5',
   explain: 'anthropic.claude-haiku-5-5',
 } as const;
@@ -56,10 +65,13 @@ export const TABLE_ENV_VARS = {
 } as const;
 
 /**
- * LLM 제공자. 최종 AWS 배포는 Bedrock이다. (conventions 3번: Free 플랜에서 안 되면 Gemini로 변경)
- * 지금은 더미 핸들러라 값이 쓰이지 않는다.
+ * LLM 제공자 기본값. 최종 AWS 배포는 Bedrock이다.
+ * 개발 중 배포는 `-c llmProvider=mock`으로 바꾼다. (백엔드 #15 syd348)
  */
-export const LLM_PROVIDER = 'bedrock';
+export const DEFAULT_LLM_PROVIDER = 'bedrock';
+
+/** `-c llmProvider`로 고를 수 있는 값. gemini·anthropic은 API 키 전달 방법이 정해지지 않아 막아 둔다. */
+export const LLM_PROVIDERS = ['bedrock', 'mock'] as const;
 
 /**
  * API Gateway 스테이지 스로틀 (모든 경로·메서드 공통). Bedrock 비용 폭주를 막는 용도다.
@@ -100,6 +112,7 @@ export interface ArchimateConfig {
    */
   readonly webSourcePath: string;
   readonly bedrockModelIds: typeof BEDROCK_MODEL_IDS;
+  readonly bedrockFoundationModelIds: typeof BEDROCK_FOUNDATION_MODEL_IDS;
   /** Lambda 코드 출처 (`-c lambdaCode=stub|backend`, 기본 stub) */
   readonly lambdaCodeSource: LambdaCodeSource;
   /**
@@ -107,6 +120,7 @@ export interface ArchimateConfig {
    * pip 의존성 번들은 6단계에서 추가한다.
    */
   readonly lambdaCodePath: string;
+  /** LLM 제공자 (`-c llmProvider=bedrock|mock`, 기본 bedrock) */
   readonly llmProvider: string;
 }
 
@@ -133,6 +147,10 @@ export function loadConfig(app: App): ArchimateConfig {
   if (lambdaCodeSource !== 'stub' && lambdaCodeSource !== 'backend') {
     throw new Error(`lambdaCode "${lambdaCodeSource}"는 stub 또는 backend만 쓸 수 있습니다.`);
   }
+  const llmProvider = readString(app, 'llmProvider') ?? DEFAULT_LLM_PROVIDER;
+  if (!(LLM_PROVIDERS as readonly string[]).includes(llmProvider)) {
+    throw new Error(`llmProvider "${llmProvider}"는 ${LLM_PROVIDERS.join(' 또는 ')}만 쓸 수 있습니다.`);
+  }
   const backendPath = path.resolve(readString(app, 'backendPath') ?? '../ArchiMate-Backend');
   const webAssetPath = path.resolve(readString(app, 'webAssetPath') ?? '../ArchiMate-Frontend/out');
 
@@ -146,9 +164,10 @@ export function loadConfig(app: App): ArchimateConfig {
     webAssetPath,
     webSourcePath: fs.existsSync(path.join(webAssetPath, 'index.html')) ? webAssetPath : WEB_PLACEHOLDER_PATH,
     bedrockModelIds: BEDROCK_MODEL_IDS,
+    bedrockFoundationModelIds: BEDROCK_FOUNDATION_MODEL_IDS,
     lambdaCodeSource,
     lambdaCodePath: lambdaCodeSource === 'backend' ? path.join(backendPath, 'src') : LAMBDA_STUB_PATH,
-    llmProvider: LLM_PROVIDER,
+    llmProvider,
   };
 }
 
