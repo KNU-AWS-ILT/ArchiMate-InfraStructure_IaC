@@ -15,9 +15,8 @@ export const TAG_OWNER = 'infra';
 export const DEFAULT_STAGE = 'demo';
 
 /**
- * DynamoDB TTL 속성 이름 (임시값).
- * 백엔드 #12 결정 대기: 속성 이름과 designs 보관 기간이 정해지면 이 값만 바꾼다. (Task.md Q5)
- * 현재는 `explanations` 테이블에만 적용한다.
+ * DynamoDB TTL 속성 이름. 백엔드 #15 확정.
+ * `designs`와 `explanations` 테이블에 적용한다. (`prices`는 TTL 없음)
  */
 export const TTL_ATTRIBUTE_NAME = 'expiresAt';
 
@@ -35,7 +34,7 @@ export interface ArchimateConfig {
   /** 스테이지 이름. 리소스 이름과 Environment 태그에 쓰인다. */
   readonly stage: string;
   readonly monthlyBudgetUsd: number;
-  /** DynamoDB TTL 속성 이름. 백엔드 #12 결정 대기 (임시값) */
+  /** DynamoDB TTL 속성 이름. 백엔드 #15 확정 */
   readonly ttlAttributeName: string;
   /** Budgets 알림 이메일 (`-c alertEmail=...`). Budgets를 만들 때 필수로 바꾼다. */
   readonly alertEmail?: string;

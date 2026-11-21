@@ -25,40 +25,46 @@ describe('DynamoDB 테이블', () => {
     template.resourceCountIs('AWS::DynamoDB::Table', 3);
   });
 
-  it('designs: userId / jobId, PITR 켬', () => {
+  it('designs: 파티션 키 jobId만(정렬 키 없음), PITR 켬, TTL expiresAt (백엔드 #15 확정)', () => {
     template.hasResourceProperties('AWS::DynamoDB::Table', {
       TableName: 'archimate-demo-dynamodb-designs',
-      KeySchema: [
-        { AttributeName: 'userId', KeyType: 'HASH' },
-        { AttributeName: 'jobId', KeyType: 'RANGE' },
-      ],
+      KeySchema: [{ AttributeName: 'jobId', KeyType: 'HASH' }],
+      AttributeDefinitions: [{ AttributeName: 'jobId', AttributeType: 'S' }],
       PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
+      TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
     });
   });
 
-  it('prices: service / regionUsageType', () => {
+  it('prices: service / regionUsageType (백엔드 #15 확정)', () => {
     template.hasResourceProperties('AWS::DynamoDB::Table', {
       TableName: 'archimate-demo-dynamodb-prices',
       KeySchema: [
         { AttributeName: 'service', KeyType: 'HASH' },
         { AttributeName: 'regionUsageType', KeyType: 'RANGE' },
       ],
+      AttributeDefinitions: [
+        { AttributeName: 'service', AttributeType: 'S' },
+        { AttributeName: 'regionUsageType', AttributeType: 'S' },
+      ],
     });
   });
 
-  it('explanations: service / context, TTL 켬 (속성 이름은 백엔드 #12 결정 대기)', () => {
+  it('explanations: designId / nodeId, TTL expiresAt (백엔드 #15 확정)', () => {
     template.hasResourceProperties('AWS::DynamoDB::Table', {
       TableName: 'archimate-demo-dynamodb-explanations',
       KeySchema: [
-        { AttributeName: 'service', KeyType: 'HASH' },
-        { AttributeName: 'context', KeyType: 'RANGE' },
+        { AttributeName: 'designId', KeyType: 'HASH' },
+        { AttributeName: 'nodeId', KeyType: 'RANGE' },
+      ],
+      AttributeDefinitions: [
+        { AttributeName: 'designId', AttributeType: 'S' },
+        { AttributeName: 'nodeId', AttributeType: 'S' },
       ],
       TimeToLiveSpecification: { AttributeName: 'expiresAt', Enabled: true },
     });
   });
 
-  it('prices와 designs에는 TTL이 없다', () => {
-    expect(tableByName('archimate-demo-dynamodb-designs').Properties.TimeToLiveSpecification).toBeUndefined();
+  it('prices에는 TTL이 없다', () => {
     expect(tableByName('archimate-demo-dynamodb-prices').Properties.TimeToLiveSpecification).toBeUndefined();
   });
 
