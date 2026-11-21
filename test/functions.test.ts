@@ -159,8 +159,9 @@ describe('환경 변수', () => {
   });
 
   it('각 Lambda에는 필요한 환경 변수만 있다', () => {
+    // generate의 EXPLANATIONS_TABLE은 백엔드 storage/dynamodb.py가 시작할 때 읽어서 넣는다. (권한은 아래 권한표에서 없음을 확인)
     expect(Object.keys(variables(GENERATE)).sort()).toEqual(
-      ['DESIGNS_TABLE', 'LLM_MODEL', 'LLM_PROVIDER', 'PRICES_TABLE'].sort(),
+      ['DESIGNS_TABLE', 'EXPLANATIONS_TABLE', 'LLM_MODEL', 'LLM_PROVIDER', 'PRICES_TABLE'].sort(),
     );
     expect(Object.keys(variables(EXPLAIN)).sort()).toEqual(
       ['DESIGNS_TABLE', 'EXPLANATIONS_TABLE', 'LLM_EXPLAIN_MODEL', 'LLM_PROVIDER'].sort(),
@@ -174,6 +175,7 @@ describe('환경 변수', () => {
     const explanations = tableLogicalId('archimate-demo-dynamodb-explanations');
     expect(variables(GENERATE).DESIGNS_TABLE).toEqual({ Ref: designs });
     expect(variables(GENERATE).PRICES_TABLE).toEqual({ Ref: prices });
+    expect(variables(GENERATE).EXPLANATIONS_TABLE).toEqual({ Ref: explanations });
     expect(variables(EXPLAIN).DESIGNS_TABLE).toEqual({ Ref: designs });
     expect(variables(EXPLAIN).EXPLANATIONS_TABLE).toEqual({ Ref: explanations });
     expect(variables(SYNC_PRICES).PRICES_TABLE).toEqual({ Ref: prices });
@@ -236,7 +238,7 @@ describe('비동기 호출 재시도', () => {
 });
 
 describe('테이블 권한표', () => {
-  it('generate: designs 읽기·쓰기, prices 읽기, explanations 없음', () => {
+  it('generate: designs 읽기·쓰기, prices 읽기, explanations 없음 (환경 변수에 이름이 있어도 권한은 없다, 백엔드 #15)', () => {
     expect(tableAccess(GENERATE)).toEqual({ designs: 'read+write', prices: 'read', explanations: 'none' });
   });
 

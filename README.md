@@ -30,7 +30,7 @@
 > - Bedrock은 Lambda마다 **추론 프로필과 파운데이션 모델, 두 곳만** 호출할 수 있습니다(와일드카드 없음). 모델 ID는 `global.anthropic.claude-opus-5-5`(설계), `global.anthropic.claude-haiku-5-5`(설명)이며 배포 전에 `list-inference-profiles`로 실제 ID를 확인합니다. (백엔드 #15·#22)
 > - 스로틀: 모든 경로에 초당 10회, 순간 20회 **(임시값)**. Bedrock 비용이 갑자기 늘지 않게 막는 용도입니다.
 > - CORS는 설정하지 않습니다. 프론트가 같은 주소(CloudFront)의 `/api/v1`만 호출하기 때문입니다.
-> - API Gateway가 직접 보내는 오류(401·429·504·그 밖의 4xx·5xx)도 `{ code, message, retryable, requestId }` 형식으로 맞춥니다. 504→`LLM_TIMEOUT`, 그 밖의 4xx→`INVALID_REQUEST`는 인프라가 정한 매핑이라 백엔드 확인이 필요합니다.
+> - API Gateway가 직접 보내는 오류(401·403·429·504·그 밖의 4xx·5xx)도 `{ code, message, retryable, requestId }` 형식으로 맞춥니다. 401과 403만 `UNAUTHORIZED`로 구분하고(백엔드 FastAPI와 같은 기준), 504→`LLM_TIMEOUT`, 그 밖의 4xx→`INVALID_REQUEST`는 백엔드 #15에서 확인했습니다.
 
 * **구성도**
 
@@ -232,7 +232,7 @@ npx cdk destroy
 | `archimate-demo` | DynamoDB 3개 (`designs`, `prices`, `explanations`) | 설계 결과, 단가, 노드 설명 캐시 저장. 모두 온디맨드 |
 | `archimate-demo` | Cognito User Pool 1개, 앱 클라이언트 1개 | 로그인 토큰 발급 (API 호출 전 인증) |
 | `archimate-demo` | Lambda 3개 (`generate`, `explain`, `sync_prices`), 로그 그룹 3개 | 3안 생성·조회, 노드 설명, 단가 동기화. (CDK가 S3 업로드·자동 삭제용 도우미 Lambda를 2개 더 만듦) |
-| `archimate-demo` | API Gateway REST API 1개, Authorizer 1개, 라우트 4개, 게이트웨이 오류 응답 5종 | `/api/v1/...` 요청 접수와 인증, 오류 응답 형식 통일 |
+| `archimate-demo` | API Gateway REST API 1개, Authorizer 1개, 라우트 4개, 게이트웨이 오류 응답 6종 | `/api/v1/...` 요청 접수와 인증, 오류 응답 형식 통일 |
 | `archimate-demo` | S3 버킷 1개, CloudFront 배포 1개, CloudFront Function 1개, OAC 1개 | 프론트 정적 파일 서비스, `/api/*`를 API Gateway로 전달 |
 | `archimate-demo` | EventBridge 규칙 1개 | 매일 새벽 `sync_prices` 실행 (임시값) |
 | `archimate-demo` | Budgets 1개 | 월 30 USD, 실제 50%·80%, 예측 100% 이메일 알림 |

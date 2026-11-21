@@ -67,6 +67,10 @@ export class Functions extends Construct {
 
     // 설계 생성: 환경 변수 LLM_PROVIDER, LLM_MODEL
     // 기한 관련 환경 변수(LLM_GENERATION_DEADLINE_S 등)는 넣지 않는다. 백엔드 기본값을 쓴다. (백엔드 #15)
+    //
+    // EXPLANATIONS_TABLE은 이름만 넘기고 권한은 주지 않는다.
+    // 백엔드 storage/dynamodb.py가 시작할 때 DESIGNS_TABLE과 EXPLANATIONS_TABLE을 둘 다 읽기 때문에 환경 변수는 필요하지만,
+    // generate가 explanations 테이블을 읽고 쓰지는 않는다. (백엔드 #15 권한표: generate는 explanations 권한 없음, PR #26)
     this.generate = createFunction(
       'Generate',
       'generate',
@@ -75,12 +79,14 @@ export class Functions extends Construct {
       {
         [TABLE_ENV_VARS.designs]: data.designs.tableName,
         [TABLE_ENV_VARS.prices]: data.prices.tableName,
+        [TABLE_ENV_VARS.explanations]: data.explanations.tableName,
         LLM_PROVIDER: config.llmProvider,
         LLM_MODEL: config.bedrockModelIds.design,
       },
     );
     data.designs.grantReadWriteData(this.generate);
     data.prices.grantReadData(this.generate);
+    // explanations 권한은 일부러 주지 않는다. (위 설명 참고)
 
     // 자기 자신 비동기 호출 권한. POST가 jobId를 저장한 뒤 같은 함수를 다시 호출한다. (백엔드 #7)
     // grantInvoke(자기 자신)는 역할 → 정책 → 함수 순환 참조가 생기므로, 함수 이름으로 ARN을 직접 만든다.

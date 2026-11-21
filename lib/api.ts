@@ -45,7 +45,17 @@ export const GATEWAY_ERRORS: readonly GatewayError[] = [
     retryable: true,
   },
   {
-    // 인프라 매핑, 백엔드 확인 필요 (#7 에러표에 없음).
+    // 401과 403만 UNAUTHORIZED로 구분한다. 백엔드 FastAPI와 같은 기준이다. (백엔드 #15, dev-sohyeon)
+    // 이 403은 ACCESS_DENIED 유형이다. 다른 403(MISSING_AUTHENTICATION_TOKEN 등)은 아래 DEFAULT_4XX로 간다.
+    id: 'AccessDenied',
+    type: ResponseType.ACCESS_DENIED,
+    statusCode: '403',
+    code: 'UNAUTHORIZED',
+    message: '접근 권한이 없어요.',
+    retryable: false,
+  },
+  {
+    // 인프라 매핑, 백엔드 #15 확인 완료 (#7 에러표에는 없음).
     // 통합 시간 초과는 LLM 때문이 아닐 수도 있는데 LLM_TIMEOUT으로 내보낸다.
     id: 'IntegrationTimeout',
     type: ResponseType.INTEGRATION_TIMEOUT,
@@ -55,8 +65,8 @@ export const GATEWAY_ERRORS: readonly GatewayError[] = [
     retryable: true,
   },
   {
-    // 인프라 매핑, 백엔드 확인 필요 (#7 에러표에 없음).
-    // 위에서 따로 정하지 않은 모든 4xx(403, 404, 400 등)가 INVALID_REQUEST가 된다.
+    // 인프라 매핑, 백엔드 #15 확인 완료 (#7 에러표에는 없음).
+    // 위에서 따로 정하지 않은 모든 4xx(404, 400, 그리고 ACCESS_DENIED가 아닌 403 등)가 INVALID_REQUEST가 된다.
     id: 'Default4xx',
     type: ResponseType.DEFAULT_4XX,
     code: 'INVALID_REQUEST',

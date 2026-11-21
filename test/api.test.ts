@@ -187,14 +187,15 @@ describe('게이트웨이 응답 (API Gateway가 직접 보내는 오류)', () =
   // [응답 유형, 상태 코드(없으면 원래 코드 유지), code, retryable]
   const expected: [string, string | undefined, string, boolean][] = [
     ['UNAUTHORIZED', '401', 'UNAUTHORIZED', false],
+    ['ACCESS_DENIED', '403', 'UNAUTHORIZED', false], // 401·403만 UNAUTHORIZED, 백엔드 FastAPI와 같음 (백엔드 #15)
     ['THROTTLED', '429', 'RATE_LIMITED', true],
-    ['INTEGRATION_TIMEOUT', '504', 'LLM_TIMEOUT', true], // 인프라 매핑, 백엔드 확인 필요
-    ['DEFAULT_4XX', undefined, 'INVALID_REQUEST', false], // 인프라 매핑, 백엔드 확인 필요
+    ['INTEGRATION_TIMEOUT', '504', 'LLM_TIMEOUT', true], // 인프라 매핑, 백엔드 #15 확인 완료
+    ['DEFAULT_4XX', undefined, 'INVALID_REQUEST', false], // 인프라 매핑, 백엔드 #15 확인 완료
     ['DEFAULT_5XX', undefined, 'INTERNAL_ERROR', true],
   ];
 
-  it('게이트웨이 응답은 5개다', () => {
-    template.resourceCountIs('AWS::ApiGateway::GatewayResponse', 5);
+  it('게이트웨이 응답은 6개다', () => {
+    template.resourceCountIs('AWS::ApiGateway::GatewayResponse', 6);
     expect(gatewayResponses.map((r) => r.Properties.ResponseType).sort()).toEqual(
       expected.map(([type]) => type).sort(),
     );
