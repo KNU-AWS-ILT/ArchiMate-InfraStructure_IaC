@@ -99,7 +99,9 @@ describe('라우트', () => {
     expect(Object.values(routes())).not.toContain(SYNC_PRICES);
     const permissions = Object.values(template.findResources('AWS::Lambda::Permission')) as Json[];
     const syncId = functionId(SYNC_PRICES);
-    expect(permissions.filter((p) => JSON.stringify(p.Properties.FunctionName).includes(syncId))).toHaveLength(0);
+    // sync_prices를 호출할 수 있는 건 EventBridge뿐이다. (API Gateway 권한은 없다)
+    const forSync = permissions.filter((p) => JSON.stringify(p.Properties.FunctionName).includes(syncId));
+    expect(forSync.map((p) => p.Properties.Principal)).toEqual(['events.amazonaws.com']);
   });
 
   it('API Gateway가 generate와 explain을 호출할 권한이 있다', () => {

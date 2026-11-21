@@ -130,10 +130,6 @@ describe('Lambda 3개 공통 설정', () => {
     }
   });
 
-  it('EventBridge 스케줄은 아직 없다 (3-6단계)', () => {
-    template.resourceCountIs('AWS::Events::Rule', 0);
-  });
-
   it('스테이지를 바꾸면 이름이 따라간다', () => {
     synth({ stage: 'test' }).hasResourceProperties('AWS::Lambda::Function', {
       FunctionName: 'archimate-test-lambda-generate',

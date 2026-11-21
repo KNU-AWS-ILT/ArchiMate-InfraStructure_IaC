@@ -8,6 +8,19 @@ export const REGION = 'ap-northeast-2';
 /** 월 예산(USD). Budgets 알람 기준. */
 export const MONTHLY_BUDGET_USD = 30;
 
+/** Budgets 알림 기준. 실제 비용 50%·80%, 예측 비용 100%. (인프라 #6) */
+export const BUDGET_ALERTS = [
+  { type: 'ACTUAL', thresholdPercent: 50 },
+  { type: 'ACTUAL', thresholdPercent: 80 },
+  { type: 'FORECASTED', thresholdPercent: 100 },
+] as const;
+
+/**
+ * 단가 동기화(sync_prices) 실행 시각. EventBridge cron은 UTC 기준이다.
+ * 명세 없음, 임시값. 명세에는 "매일 새벽"만 있어서 한국 시간 03:00(UTC 18:00)으로 정했다.
+ */
+export const SYNC_PRICES_SCHEDULE = { minute: '0', hour: '18' } as const;
+
 /** 모든 리소스에 붙이는 태그 값 [conventions 11번] */
 export const TAG_PROJECT = 'ArchiMate';
 export const TAG_OWNER = 'infra';
@@ -100,7 +113,10 @@ export interface ArchimateConfig {
   readonly monthlyBudgetUsd: number;
   /** DynamoDB TTL 속성 이름. 백엔드 #15 확정 */
   readonly ttlAttributeName: string;
-  /** Budgets 알림 이메일 (`-c alertEmail=...`). Budgets를 만들 때 필수로 바꾼다. */
+  /**
+   * Budgets 알림 이메일 (`-c alertEmail=...`). 없으면 Budgets를 만들지 않고 synth 경고만 낸다.
+   * 막바지 AWS 배포(7단계)에서는 반드시 넘긴다.
+   */
   readonly alertEmail?: string;
   /** 백엔드 레포 절대 경로 (`-c backendPath=...`) */
   readonly backendPath: string;
@@ -125,6 +141,8 @@ export interface ArchimateConfig {
 }
 
 const STAGE_PATTERN = /^[a-z][a-z0-9-]{0,14}$/;
+/** 아주 단순한 형식 검사. 잘못된 주소가 배포 단계에서야 발견되지 않게 한다. */
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 function readString(app: App, key: string): string | undefined {
   const value = app.node.tryGetContext(key);
@@ -147,6 +165,10 @@ export function loadConfig(app: App): ArchimateConfig {
   if (lambdaCodeSource !== 'stub' && lambdaCodeSource !== 'backend') {
     throw new Error(`lambdaCode "${lambdaCodeSource}"는 stub 또는 backend만 쓸 수 있습니다.`);
   }
+  const alertEmail = readString(app, 'alertEmail');
+  if (alertEmail !== undefined && !EMAIL_PATTERN.test(alertEmail)) {
+    throw new Error(`alertEmail "${alertEmail}"는 이메일 주소 형식이 아닙니다.`);
+  }
   const llmProvider = readString(app, 'llmProvider') ?? DEFAULT_LLM_PROVIDER;
   if (!(LLM_PROVIDERS as readonly string[]).includes(llmProvider)) {
     throw new Error(`llmProvider "${llmProvider}"는 ${LLM_PROVIDERS.join(' 또는 ')}만 쓸 수 있습니다.`);
@@ -159,7 +181,7 @@ export function loadConfig(app: App): ArchimateConfig {
     stage,
     monthlyBudgetUsd: MONTHLY_BUDGET_USD,
     ttlAttributeName: TTL_ATTRIBUTE_NAME,
-    alertEmail: readString(app, 'alertEmail'),
+    alertEmail,
     backendPath,
     webAssetPath,
     webSourcePath: fs.existsSync(path.join(webAssetPath, 'index.html')) ? webAssetPath : WEB_PLACEHOLDER_PATH,
