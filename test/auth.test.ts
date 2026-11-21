@@ -46,7 +46,8 @@ describe('Cognito', () => {
 
   it('User Pool ID와 Client ID를 출력값으로 내보낸다', () => {
     const outputs = template.toJSON().Outputs;
-    expect(Object.keys(outputs).sort()).toEqual(['userPoolClientId', 'userPoolId']);
+    // API Gateway(3-4)가 기본으로 만드는 주소 출력값이 따로 있어서, 정확히 2개가 아니라 두 값이 있는지 본다.
+    expect(Object.keys(outputs)).toEqual(expect.arrayContaining(['userPoolClientId', 'userPoolId']));
     expect(outputs.userPoolId.Value).toEqual({ Ref: expect.stringMatching(/^AuthUserPool/) });
     expect(outputs.userPoolClientId.Value).toEqual({ Ref: expect.stringMatching(/^AuthUserPoolClient/) });
   });

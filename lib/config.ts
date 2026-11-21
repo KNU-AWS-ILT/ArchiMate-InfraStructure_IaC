@@ -60,6 +60,17 @@ export const TABLE_ENV_VARS = {
  */
 export const LLM_PROVIDER = 'bedrock';
 
+/**
+ * API Gateway 스테이지 스로틀 (모든 경로·메서드 공통). Bedrock 비용 폭주를 막는 용도다.
+ * 명세 없음, 임시값. 추후 백엔드·PM과 협의 후 확정한다.
+ */
+export const API_THROTTLE = {
+  /** 초당 요청 수 */
+  rateLimit: 10,
+  /** 순간 최대 요청 수 */
+  burstLimit: 20,
+} as const;
+
 /** Lambda 코드 위치. `stub`은 IaC 레포 안의 더미, `backend`는 백엔드 레포의 `src/`. */
 export type LambdaCodeSource = 'stub' | 'backend';
 
