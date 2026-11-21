@@ -29,6 +29,43 @@ export const BEDROCK_MODEL_IDS = {
   explain: 'anthropic.claude-haiku-5-5',
 } as const;
 
+/**
+ * Lambda 진입 함수. 백엔드 #15 확정. 모듈 경로는 `archimate/handlers/*.py`.
+ * 더미(lambda-stub)와 백엔드 코드가 같은 모듈 경로를 쓰므로 코드 위치만 바꾸면 된다.
+ */
+export const LAMBDA_HANDLERS = {
+  generate: 'archimate.handlers.generate.handler',
+  explain: 'archimate.handlers.explain.handler',
+  syncPrices: 'archimate.handlers.sync_prices.handler',
+} as const;
+
+/** Lambda 제한 시간(초). generate 180, explain 25는 백엔드 #7 합의. */
+export const LAMBDA_TIMEOUT_SECONDS = {
+  generate: 180,
+  explain: 25,
+  // 명세에 없음. 기본값 3초로는 Price List API 호출이 끝나지 않아 임시로 300초로 둔다. (백엔드(API·비용) 확인 필요)
+  syncPrices: 300,
+} as const;
+
+/** 테이블 이름을 Lambda에 넘기는 환경 변수 이름. 백엔드 #15. 각 Lambda에는 필요한 것만 넘긴다. */
+export const TABLE_ENV_VARS = {
+  designs: 'DESIGNS_TABLE',
+  prices: 'PRICES_TABLE',
+  explanations: 'EXPLANATIONS_TABLE',
+} as const;
+
+/**
+ * LLM 제공자. 최종 AWS 배포는 Bedrock이다. (conventions 3번: Free 플랜에서 안 되면 Gemini로 변경)
+ * 지금은 더미 핸들러라 값이 쓰이지 않는다.
+ */
+export const LLM_PROVIDER = 'bedrock';
+
+/** Lambda 코드 위치. `stub`은 IaC 레포 안의 더미, `backend`는 백엔드 레포의 `src/`. */
+export type LambdaCodeSource = 'stub' | 'backend';
+
+/** IaC 레포 안의 더미 핸들러 폴더. 백엔드 코드가 main에 올라오기 전까지 쓴다. */
+export const LAMBDA_STUB_PATH = path.resolve(__dirname, '..', 'lambda-stub');
+
 export interface ArchimateConfig {
   readonly region: string;
   /** 스테이지 이름. 리소스 이름과 Environment 태그에 쓰인다. */
@@ -43,6 +80,14 @@ export interface ArchimateConfig {
   /** 프론트 정적 내보내기 결과물 절대 경로 (`-c webAssetPath=...`) */
   readonly webAssetPath: string;
   readonly bedrockModelIds: typeof BEDROCK_MODEL_IDS;
+  /** Lambda 코드 출처 (`-c lambdaCode=stub|backend`, 기본 stub) */
+  readonly lambdaCodeSource: LambdaCodeSource;
+  /**
+   * Lambda 코드 폴더(`archimate/` 패키지의 부모). stub이면 `lambda-stub/`, backend이면 `<backendPath>/src`.
+   * pip 의존성 번들은 6단계에서 추가한다.
+   */
+  readonly lambdaCodePath: string;
+  readonly llmProvider: string;
 }
 
 const STAGE_PATTERN = /^[a-z][a-z0-9-]{0,14}$/;
@@ -64,15 +109,24 @@ export function loadConfig(app: App): ArchimateConfig {
     );
   }
 
+  const lambdaCodeSource = readString(app, 'lambdaCode') ?? 'stub';
+  if (lambdaCodeSource !== 'stub' && lambdaCodeSource !== 'backend') {
+    throw new Error(`lambdaCode "${lambdaCodeSource}"는 stub 또는 backend만 쓸 수 있습니다.`);
+  }
+  const backendPath = path.resolve(readString(app, 'backendPath') ?? '../ArchiMate-Backend');
+
   return {
     region: REGION,
     stage,
     monthlyBudgetUsd: MONTHLY_BUDGET_USD,
     ttlAttributeName: TTL_ATTRIBUTE_NAME,
     alertEmail: readString(app, 'alertEmail'),
-    backendPath: path.resolve(readString(app, 'backendPath') ?? '../ArchiMate-Backend'),
+    backendPath,
     webAssetPath: path.resolve(readString(app, 'webAssetPath') ?? '../ArchiMate-Frontend/out'),
     bedrockModelIds: BEDROCK_MODEL_IDS,
+    lambdaCodeSource,
+    lambdaCodePath: lambdaCodeSource === 'backend' ? path.join(backendPath, 'src') : LAMBDA_STUB_PATH,
+    llmProvider: LLM_PROVIDER,
   };
 }
 

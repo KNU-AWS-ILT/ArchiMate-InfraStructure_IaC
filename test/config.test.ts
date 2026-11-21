@@ -23,4 +23,20 @@ describe('loadConfig', () => {
     const app = new App({ context: { stage: 'Prod_1' } });
     expect(() => loadConfig(app)).toThrow();
   });
+
+  it('Lambda 코드는 기본으로 더미(lambda-stub)를 쓴다', () => {
+    const config = loadConfig(new App());
+    expect(config.lambdaCodeSource).toBe('stub');
+    expect(config.lambdaCodePath).toMatch(/lambda-stub$/);
+  });
+
+  it('-c lambdaCode=backend이면 백엔드 레포의 src를 쓴다', () => {
+    const config = loadConfig(new App({ context: { lambdaCode: 'backend', backendPath: '../ArchiMate-Backend' } }));
+    expect(config.lambdaCodeSource).toBe('backend');
+    expect(config.lambdaCodePath).toMatch(/ArchiMate-Backend[\\/]src$/);
+  });
+
+  it('lambdaCode에 stub·backend 외의 값은 거부한다', () => {
+    expect(() => loadConfig(new App({ context: { lambdaCode: 'zip' } }))).toThrow();
+  });
 });
