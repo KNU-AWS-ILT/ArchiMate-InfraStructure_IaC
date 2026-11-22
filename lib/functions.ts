@@ -107,7 +107,7 @@ export class Functions extends Construct {
 
     // 비동기 호출 재시도 끔. 백엔드 코드가 안에서 재시도하므로, AWS가 실패한 호출을 다시 실행하면
     // LLM 호출이 중복돼 비용이 늘어난다. (Lambda 비동기 호출의 기본값은 실패 시 2회 재시도)
-    // (명세 없음, 인프라 제안값. 추후 백엔드와 이슈로 협의 후 확정)
+    // (백엔드 #15에서 syd348 동의, 확정)
     this.generate.configureAsyncInvoke({ retryAttempts: 0 });
 
     // 노드 설명: 환경 변수 LLM_PROVIDER, LLM_EXPLAIN_MODEL. prices 권한 없음.

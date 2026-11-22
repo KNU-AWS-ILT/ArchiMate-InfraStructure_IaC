@@ -23,7 +23,7 @@
 * **기능 소개**
 
 > 요청을 받는 REST API(리전 엔드포인트)와 Lambda 3개를 만듭니다. 모든 라우트는 Lambda 프록시 통합이며, Cognito 로그인 토큰을 API Gateway에서 먼저 확인합니다.
-> - **설계 생성 `generate`** (제한 시간 180초): `POST /api/v1/designs`를 받으면 jobId를 저장하고, **자기 자신을 비동기로 호출한 뒤 바로 `202 { jobId }`로 응답**합니다. 같은 Lambda가 작업 상태 조회와 운영 절차 조회도 처리합니다. 비동기 호출 재시도는 끕니다. 백엔드 코드가 안에서 재시도하므로, AWS가 다시 실행하면 LLM 호출이 중복되기 때문입니다. **(임시값)**
+> - **설계 생성 `generate`** (제한 시간 180초): `POST /api/v1/designs`를 받으면 jobId를 저장하고, **자기 자신을 비동기로 호출한 뒤 바로 `202 { jobId }`로 응답**합니다. 같은 Lambda가 작업 상태 조회와 운영 절차 조회도 처리합니다. 비동기 호출 재시도는 끕니다. 백엔드 코드가 안에서 재시도하므로, AWS가 다시 실행하면 LLM 호출이 중복되기 때문입니다. **(백엔드 #15에서 확정)**
 > - **노드 설명 `explain`** (제한 시간 25초): `GET .../nodes/{nodeId}/explanation`을 처리합니다. 소형 모델 ID는 환경 변수 `LLM_EXPLAIN_MODEL`로 받습니다.
 > - **단가 동기화 `sync_prices`** (제한 시간 300초 **(임시값)**): EventBridge가 **매일 한국 시간 03:00(UTC 18:00) (임시값)**에 실행해 Price List API(us-east-1)의 단가를 `prices` 테이블에 덮어씁니다.
 > - 공통: Python 3.12, ARM64, 로그 보존 2주(스택을 지우면 로그도 삭제), 메모리는 Lambda 기본값(128MB). Lambda마다 **필요한 테이블 권한만** 줍니다. (`generate`: designs 읽기·쓰기 + prices 읽기, `explain`: designs 읽기 + explanations 읽기·쓰기, `sync_prices`: prices 쓰기)
