@@ -154,8 +154,8 @@ describe('제한 시간', () => {
 describe('환경 변수', () => {
   const variables = (name: string): Json => functionByName(name).resource.Properties.Environment.Variables;
 
-  it('explain에 LLM_EXPLAIN_MODEL이 있다 (추론 프로필 ID, 백엔드 #15·#22)', () => {
-    expect(variables(EXPLAIN).LLM_EXPLAIN_MODEL).toBe('global.anthropic.claude-haiku-5-5');
+  it('explain에 LLM_EXPLAIN_MODEL이 있다 (접두사 없는 모델 ID, 백엔드 #15 syd348 정정)', () => {
+    expect(variables(EXPLAIN).LLM_EXPLAIN_MODEL).toBe('anthropic.claude-haiku-5-5');
   });
 
   it('각 Lambda에는 필요한 환경 변수만 있다', () => {
@@ -181,10 +181,15 @@ describe('환경 변수', () => {
     expect(variables(SYNC_PRICES).PRICES_TABLE).toEqual({ Ref: prices });
   });
 
-  it('LLM_PROVIDER 기본값은 bedrock, LLM_MODEL은 추론 프로필 ID다 (백엔드 #15·#22)', () => {
+  it('LLM_PROVIDER 기본값은 bedrock, LLM_MODEL은 접두사 없는 모델 ID다 (백엔드 #15 syd348 정정)', () => {
     expect(variables(GENERATE).LLM_PROVIDER).toBe('bedrock');
-    expect(variables(GENERATE).LLM_MODEL).toBe('global.anthropic.claude-opus-5-5');
+    expect(variables(GENERATE).LLM_MODEL).toBe('anthropic.claude-opus-5-5');
     expect(variables(EXPLAIN).LLM_PROVIDER).toBe('bedrock');
+  });
+
+  it('모델 ID에 global. 같은 리전 접두사가 없다 (서울은 Global 엔드포인트)', () => {
+    expect(variables(GENERATE).LLM_MODEL).toMatch(/^anthropic\./);
+    expect(variables(EXPLAIN).LLM_EXPLAIN_MODEL).toMatch(/^anthropic\./);
   });
 
   it('-c llmProvider=mock으로 바꾸면 generate·explain의 LLM_PROVIDER가 mock이다', () => {
@@ -197,7 +202,7 @@ describe('환경 변수', () => {
     const generate = Object.values(
       mock.findResources('AWS::Lambda::Function', { Properties: { FunctionName: GENERATE } }),
     )[0] as Json;
-    expect(generate.Properties.Environment.Variables.LLM_MODEL).toBe('global.anthropic.claude-opus-5-5');
+    expect(generate.Properties.Environment.Variables.LLM_MODEL).toBe('anthropic.claude-opus-5-5');
   });
 
   it('기한 환경 변수(LLM_GENERATION_DEADLINE_S 등)는 넣지 않는다 (백엔드 기본값 사용)', () => {
@@ -252,51 +257,38 @@ describe('테이블 권한표', () => {
 });
 
 /**
- * Bedrock 문장이 두 곳(추론 프로필, 파운데이션 모델)만 허용하고 와일드카드가 없는지 확인한다.
- * 테스트의 스택은 리전·계정·파티션이 토큰이라, ARN 전체 문자열 대신 구성 요소로 검사한다.
- *  - 추론 프로필: 리전은 스택 리전, 계정은 이 계정, 이름은 정확히 `profileId`
- *  - 파운데이션 모델: 리전과 계정이 비어 있다(`:bedrock:::`), 이름은 정확히 `modelId`
+ * Bedrock 계열 권한 문장 전부. 접두사 `bedrock`은 `bedrock:`(runtime)과 `bedrock-mantle:`을 모두 잡는다.
+ * (`bedrock:`만 찾으면 `bedrock-mantle:` 권한을 놓쳐, "권한 없음" 검사가 빈 검사가 된다)
  */
-function expectBedrockStatement(statement: Json, profileId: string, modelId: string): void {
-  expect(asList(statement.Action).sort()).toEqual(['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream']);
-  expect(Array.isArray(statement.Resource)).toBe(true);
-  const resources = (statement.Resource as unknown[]).map((r) => JSON.stringify(r));
-  expect(resources).toHaveLength(2);
-
-  const profile = resources.filter((r) => r.includes(':inference-profile/'));
-  const foundation = resources.filter((r) => r.includes(':foundation-model/'));
-  expect(profile).toHaveLength(1);
-  expect(foundation).toHaveLength(1);
-
-  expect(profile[0]).toContain('"Ref":"AWS::AccountId"');
-  // ID 뒤에 다른 글자가 붙지 않아야 한다. (문자열 하나이거나 Fn::Join의 마지막 조각)
-  const endsWith = (text: string, tail: string): boolean => new RegExp(`${tail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"(\\]\\]\\})?$`).test(text);
-  expect(endsWith(profile[0], `:inference-profile/${profileId}`)).toBe(true);
-  expect(foundation[0]).toContain(`:bedrock:::foundation-model/${modelId}"`);
-  expect(endsWith(foundation[0], `:bedrock:::foundation-model/${modelId}`)).toBe(true);
-
-  for (const resource of resources) {
-    expect(resource).not.toContain('*');
-  }
-}
+const bedrockStatements = (functionName: string): Json[] => statementsWithAction(functionName, 'bedrock');
 
 describe('Bedrock·Price List 권한', () => {
-  it('generate는 설계용 모델 두 곳(추론 프로필, 파운데이션 모델)만 호출할 수 있다 (백엔드 #15·#22)', () => {
-    const bedrock = statementsWithAction(GENERATE, 'bedrock:');
+  // 백엔드 #15 syd348 정정: bedrock-mantle Messages API → `bedrock-mantle:CreateInference` 하나만 허용한다.
+  // 모델 리소스 ARN 형식이 문서에 없어 리소스는 '*'다. 형식을 확인해 두 모델로 좁히면 이 검사도 함께 바꾼다.
+  it.each([
+    ['generate', GENERATE],
+    ['explain', EXPLAIN],
+  ])('%s: bedrock-mantle:CreateInference 하나만 허용한다 (리소스 *는 임시, 실배포 전 확인)', (_label, name) => {
+    const bedrock = bedrockStatements(name);
     expect(bedrock).toHaveLength(1);
-    expectBedrockStatement(bedrock[0], 'global.anthropic.claude-opus-5-5', 'anthropic.claude-opus-5-5');
-    expect(JSON.stringify(bedrock[0])).not.toContain('haiku');
+    expect(asList(bedrock[0].Action)).toEqual(['bedrock-mantle:CreateInference']);
+    expect(bedrock[0].Resource).toBe('*');
+    expect(bedrock[0].Effect).toBe('Allow');
   });
 
-  it('explain은 소형 모델 두 곳만 호출할 수 있다 (백엔드 #15·#22)', () => {
-    const bedrock = statementsWithAction(EXPLAIN, 'bedrock:');
-    expect(bedrock).toHaveLength(1);
-    expectBedrockStatement(bedrock[0], 'global.anthropic.claude-haiku-5-5', 'anthropic.claude-haiku-5-5');
-    expect(JSON.stringify(bedrock[0])).not.toContain('opus');
+  it('InvokeModel 계열(bedrock:)과 추론 프로필·파운데이션 모델 ARN은 어디에도 없다', () => {
+    const text = JSON.stringify(json);
+    expect(text).not.toContain('bedrock:InvokeModel');
+    expect(text).not.toContain('inference-profile');
+    expect(text).not.toContain('foundation-model');
+    for (const name of [GENERATE, EXPLAIN, SYNC_PRICES]) {
+      const actions = bedrockStatements(name).flatMap((s) => asList(s.Action));
+      expect(actions.filter((a) => a.startsWith('bedrock:'))).toEqual([]);
+    }
   });
 
-  it('sync_prices에는 Bedrock 권한이 없다', () => {
-    expect(statementsWithAction(SYNC_PRICES, 'bedrock:')).toHaveLength(0);
+  it('sync_prices에는 Bedrock 계열 권한이 없다 (bedrock-mantle 포함)', () => {
+    expect(bedrockStatements(SYNC_PRICES)).toHaveLength(0);
   });
 
   it('Price List API 권한은 sync_prices에만 있다', () => {

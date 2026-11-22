@@ -27,7 +27,7 @@
 > - **노드 설명 `explain`** (제한 시간 25초): `GET .../nodes/{nodeId}/explanation`을 처리합니다. 소형 모델 ID는 환경 변수 `LLM_EXPLAIN_MODEL`로 받습니다.
 > - **단가 동기화 `sync_prices`** (제한 시간 300초 **(임시값)**): EventBridge가 **매일 한국 시간 03:00(UTC 18:00) (임시값)**에 실행해 Price List API(us-east-1)의 단가를 `prices` 테이블에 덮어씁니다.
 > - 공통: Python 3.12, ARM64, 로그 보존 2주(스택을 지우면 로그도 삭제), 메모리는 Lambda 기본값(128MB). Lambda마다 **필요한 테이블 권한만** 줍니다. (`generate`: designs 읽기·쓰기 + prices 읽기, `explain`: designs 읽기 + explanations 읽기·쓰기, `sync_prices`: prices 쓰기)
-> - Bedrock은 Lambda마다 **추론 프로필과 파운데이션 모델, 두 곳만** 호출할 수 있습니다(와일드카드 없음). 모델 ID는 `global.anthropic.claude-opus-5-5`(설계), `global.anthropic.claude-haiku-5-5`(설명)이며 배포 전에 `list-inference-profiles`로 실제 ID를 확인합니다. (백엔드 #15·#22)
+> - Bedrock은 bedrock-mantle의 Messages API로 호출합니다. `generate`와 `explain`에 **`bedrock-mantle:CreateInference` 권한 하나만** 줍니다. 모델 ID는 `anthropic.claude-opus-5-5`(설계), `anthropic.claude-haiku-5-5`(설명)이며, 서울은 Global 엔드포인트라 `global.` 같은 리전 접두사를 붙이지 않습니다. 모델 리소스 ARN 형식이 문서에 없어서 권한 범위는 지금 **모든 모델(`*`)입니다 (임시값)**. ARN 형식을 확인한 뒤 두 모델로 좁히고, 실배포 전에 확인합니다. (백엔드 #15 syd348 정정)
 > - 스로틀: 모든 경로에 초당 10회, 순간 20회 **(임시값)**. Bedrock 비용이 갑자기 늘지 않게 막는 용도입니다.
 > - CORS는 설정하지 않습니다. 프론트가 같은 주소(CloudFront)의 `/api/v1`만 호출하기 때문입니다.
 > - API Gateway가 직접 보내는 오류(401·403·429·504·그 밖의 4xx·5xx)도 `{ code, message, retryable, requestId }` 형식으로 맞춥니다. 401과 403만 `UNAUTHORIZED`로 구분하고(백엔드 FastAPI와 같은 기준), 504→`LLM_TIMEOUT`, 그 밖의 4xx→`INVALID_REQUEST`는 백엔드 #15에서 확인했습니다.
@@ -136,7 +136,7 @@ AWS Budgets (월 30 USD) ─▶ 이메일 알림
 | :---: | :--- |
 | **IaC** | AWS CDK v2 (`aws-cdk-lib`), 테스트 Jest |
 | **프로그래밍 언어** | TypeScript (Node.js 26) / Lambda 더미 핸들러는 Python 3.12 |
-| **AWS 서비스** | CloudFront, S3, API Gateway(REST), Lambda(Python 3.12, ARM64), DynamoDB, Cognito, EventBridge, Budgets, IAM, CloudWatch Logs(Lambda 로그) / Lambda가 호출하는 Bedrock·Price List API(권한만 부여) |
+| **AWS 서비스** | CloudFront, S3, API Gateway(REST), Lambda(Python 3.12, ARM64), DynamoDB, Cognito, EventBridge, Budgets, IAM, CloudWatch Logs(Lambda 로그) / Lambda가 호출하는 Bedrock(bedrock-mantle)·Price List API(권한만 부여) |
 | **CI/CD** | GitHub Actions (예정) |
 
 ---
@@ -199,12 +199,11 @@ npx cdk synth           # CloudFormation 템플릿 생성 (cdk.out/)
 
 ### 2. 막바지 AWS 배포 (발표 1주 전)
 
-> 먼저 준비할 것: AWS 계정(Free 플랜), Bedrock 콘솔에서 Anthropic 모델 사용 신청, 실제 모델 ID 확인, 프론트 정적 내보내기 결과물.
+> 먼저 준비할 것: AWS 계정(Free 플랜), Bedrock 콘솔에서 Anthropic 모델 사용 신청, 서울 리전에서 모델 ID 호출 확인과 bedrock-mantle 모델 ARN 형식 확인(IAM 범위 `*`를 두 모델로 좁히기), 프론트 정적 내보내기 결과물.
 > **`-c alertEmail`은 반드시 넘깁니다.** 빠뜨리면 Budgets 없이 배포됩니다.
 > 백엔드 코드의 pip 의존성 번들은 아직 구현 전입니다. 지금의 `-c lambdaCode=backend`는 백엔드 `src/` 폴더만 묶습니다.
 
 ```shell
-aws bedrock list-inference-profiles --region ap-northeast-2   # global.anthropic.claude-opus-5-5 / haiku-5-5 확인
 npx cdk bootstrap                                             # 계정·리전당 최초 1회
 npx cdk deploy -c alertEmail=<알림 받을 이메일> -c lambdaCode=backend -c backendPath=<백엔드 레포 경로> -c webAssetPath=<프론트 out 경로>
 ```
