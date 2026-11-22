@@ -39,18 +39,14 @@ describe('loadConfig', () => {
     expect(() => loadConfig(new App({ context: { llmProvider: 'gemini' } }))).toThrow();
   });
 
-  it('Bedrock 모델 ID는 추론 프로필과 파운데이션 모델이 짝을 이룬다 (백엔드 #15·#22)', () => {
+  it('Bedrock 모델 ID는 리전 접두사 없는 ID 하나뿐이다 (백엔드 #15 syd348 정정)', () => {
     const config = loadConfig(new App());
     expect(config.bedrockModelIds).toEqual({
-      design: 'global.anthropic.claude-opus-5-5',
-      explain: 'global.anthropic.claude-haiku-5-5',
-    });
-    expect(config.bedrockFoundationModelIds).toEqual({
       design: 'anthropic.claude-opus-5-5',
       explain: 'anthropic.claude-haiku-5-5',
     });
-    expect(config.bedrockModelIds.design).toBe(`global.${config.bedrockFoundationModelIds.design}`);
-    expect(config.bedrockModelIds.explain).toBe(`global.${config.bedrockFoundationModelIds.explain}`);
+    // 추론 프로필 ID와 파운데이션 모델 ID를 따로 두지 않는다.
+    expect(Object.keys(config).filter((key) => /foundation|inferenceProfile/i.test(key))).toEqual([]);
   });
 
   it('Lambda 코드는 기본으로 더미(lambda-stub)를 쓴다', () => {

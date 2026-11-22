@@ -143,44 +143,17 @@ export class Functions extends Construct {
       }),
     );
 
-    // Bedrock 호출 권한. Lambda마다 두 곳만 허용하고 와일드카드는 쓰지 않는다. (백엔드 #15·#22 확정)
-    //  1) 추론 프로필: 서울 리전, 이 계정의 `global.` 프로필 (예: .../inference-profile/global.anthropic.claude-opus-5-5)
-    //  2) 파운데이션 모델: 리전과 계정이 빈 ARN (예: arn:aws:bedrock:::foundation-model/anthropic.claude-opus-5-5)
-    // 배포 전 확인 필요: 실제 ID와 권한은 `list-inference-profiles`로 확인한다. 호출이 권한 오류로 거절되면 이 두 ARN부터 본다.
-    const inferenceProfileArn = (profileId: string): string =>
-      Stack.of(this).formatArn({
-        service: 'bedrock',
-        resource: 'inference-profile',
-        resourceName: profileId,
-        arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
-      });
-    const foundationModelArn = (modelId: string): string =>
-      Stack.of(this).formatArn({
-        service: 'bedrock',
-        region: '',
-        account: '',
-        resource: 'foundation-model',
-        resourceName: modelId,
-        arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
-      });
-    const bedrockActions = ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'];
-    this.generate.addToRolePolicy(
+    // Bedrock 호출 권한. generate와 explain에 `bedrock-mantle:CreateInference` 하나만 허용한다. (백엔드 #15 syd348 정정)
+    // 백엔드가 bedrock-mantle의 Messages API를 쓰므로 `bedrock:InvokeModel` 계열 권한과
+    // 추론 프로필·파운데이션 모델 ARN은 쓰지 않는다.
+    // bedrock-mantle 모델 ARN 형식 확인 후 두 모델로 좁힘 (백엔드 #15 syd348 정정, 실배포 전 확인)
+    // 지금은 문서에 모델 리소스 ARN 형식이 없어서 리소스를 '*'로 둔다. 두 함수 모두 모델을 가리지 않고 호출할 수 있다.
+    const bedrockStatement = (): PolicyStatement =>
       new PolicyStatement({
-        actions: bedrockActions,
-        resources: [
-          inferenceProfileArn(config.bedrockModelIds.design),
-          foundationModelArn(config.bedrockFoundationModelIds.design),
-        ],
-      }),
-    );
-    this.explain.addToRolePolicy(
-      new PolicyStatement({
-        actions: bedrockActions,
-        resources: [
-          inferenceProfileArn(config.bedrockModelIds.explain),
-          foundationModelArn(config.bedrockFoundationModelIds.explain),
-        ],
-      }),
-    );
+        actions: ['bedrock-mantle:CreateInference'],
+        resources: ['*'],
+      });
+    this.generate.addToRolePolicy(bedrockStatement());
+    this.explain.addToRolePolicy(bedrockStatement());
   }
 }

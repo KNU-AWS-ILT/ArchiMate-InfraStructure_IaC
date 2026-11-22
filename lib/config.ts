@@ -35,19 +35,12 @@ export const DEFAULT_STAGE = 'demo';
 export const TTL_ATTRIBUTE_NAME = 'expiresAt';
 
 /**
- * Bedrock 추론 프로필 ID. 백엔드 #15·#22 확정. Lambda 환경 변수(`LLM_MODEL`, `LLM_EXPLAIN_MODEL`)에 그대로 들어간다.
- * 배포 전 확인 필요: 실제 ID는 `aws bedrock list-inference-profiles --region ap-northeast-2`로 확인한다. (MVP_Task.md 7단계)
+ * Bedrock 모델 ID. Lambda 환경 변수(`LLM_MODEL`, `LLM_EXPLAIN_MODEL`)에 그대로 들어간다.
+ * 백엔드 #15 syd348 정정: 백엔드는 bedrock-mantle의 Messages API를 쓰고, 서울은 Global 엔드포인트라
+ * 모델 ID에 `global.` 같은 리전 접두사를 붙이지 않는다. (추론 프로필 ID, 파운데이션 모델 ID를 따로 두지 않는다)
+ * 실배포 전 확인 필요: 서울 리전에서 이 ID로 호출되는지 확인한다. (MVP_Task.md 7단계)
  */
 export const BEDROCK_MODEL_IDS = {
-  design: 'global.anthropic.claude-opus-5-5',
-  explain: 'global.anthropic.claude-haiku-5-5',
-} as const;
-
-/**
- * 위 추론 프로필이 가리키는 파운데이션 모델 ID (`global.` 접두사 없음). IAM 권한 범위에 쓴다. 백엔드 #15·#22 확정.
- * 배포 전 확인 필요: 위 추론 프로필 ID와 함께 확인한다.
- */
-export const BEDROCK_FOUNDATION_MODEL_IDS = {
   design: 'anthropic.claude-opus-5-5',
   explain: 'anthropic.claude-haiku-5-5',
 } as const;
@@ -128,7 +121,6 @@ export interface ArchimateConfig {
    */
   readonly webSourcePath: string;
   readonly bedrockModelIds: typeof BEDROCK_MODEL_IDS;
-  readonly bedrockFoundationModelIds: typeof BEDROCK_FOUNDATION_MODEL_IDS;
   /** Lambda 코드 출처 (`-c lambdaCode=stub|backend`, 기본 stub) */
   readonly lambdaCodeSource: LambdaCodeSource;
   /**
@@ -186,7 +178,6 @@ export function loadConfig(app: App): ArchimateConfig {
     webAssetPath,
     webSourcePath: fs.existsSync(path.join(webAssetPath, 'index.html')) ? webAssetPath : WEB_PLACEHOLDER_PATH,
     bedrockModelIds: BEDROCK_MODEL_IDS,
-    bedrockFoundationModelIds: BEDROCK_FOUNDATION_MODEL_IDS,
     lambdaCodeSource,
     lambdaCodePath: lambdaCodeSource === 'backend' ? path.join(backendPath, 'src') : LAMBDA_STUB_PATH,
     llmProvider,
