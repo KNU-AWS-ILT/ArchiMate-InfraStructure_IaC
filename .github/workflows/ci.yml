@@ -1,0 +1,43 @@
+name: CI
+
+# PR(모든 브랜치 대상)과 main 푸시에서 타입 검사 · 테스트 · cdk synth를 확인한다.
+# AWS 인증과 시크릿은 쓰지 않는다. (synth는 자격 증명 없이 동작하고, 배포 단계는 넣지 않는다)
+# 근거: coding-conventions.md 2번(린트·테스트·synth), 7번(CI 실패 시 머지 차단), 인프라 #2
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # job 이름 `ci`는 브랜치 보호의 필수 체크로 지정할 이름이다. 바꾸면 보호 설정도 같이 바꿔야 한다.
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    # 테스트나 synth가 멈춰도 실행기를 무한정 잡고 있지 않게 한다.
+    timeout-minutes: 15
+    steps:
+      - name: 코드 가져오기
+        uses: actions/checkout@v7
+
+      - name: Node 설치 (.nvmrc)
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 타입 검사
+        run: npx tsc --noEmit
+
+      # 순차 실행(--runInBand): 캐시가 없는 CI에서는 워커를 나누면 오히려 느리고,
+      # "worker process has failed to exit gracefully" 경고가 난다.
+      - name: 테스트
+        run: npm test -- --runInBand
+
+      - name: cdk synth
+        run: npx cdk synth

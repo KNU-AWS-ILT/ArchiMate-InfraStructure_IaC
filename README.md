@@ -137,7 +137,7 @@ AWS Budgets (월 30 USD) ─▶ 이메일 알림
 | **IaC** | AWS CDK v2 (`aws-cdk-lib`), 테스트 Jest |
 | **프로그래밍 언어** | TypeScript (Node.js 26) / Lambda 더미 핸들러는 Python 3.12 |
 | **AWS 서비스** | CloudFront, S3, API Gateway(REST), Lambda(Python 3.12, ARM64), DynamoDB, Cognito, EventBridge, Budgets, IAM, CloudWatch Logs(Lambda 로그) / Lambda가 호출하는 Bedrock·Price List API(권한만 부여) |
-| **CI/CD** | GitHub Actions (예정) |
+| **CI/CD** | GitHub Actions (PR·main 푸시마다 타입 검사 → 테스트 → synth, 배포는 예정) |
 
 ---
 
@@ -147,6 +147,7 @@ AWS Budgets (월 30 USD) ─▶ 이메일 알림
 
 ```text
 ArchiMate-InfraStructure_IaC/
+├── .github/workflows/ci.yml     CI: 타입 검사 → 테스트 → cdk synth (AWS 인증·시크릿·배포 없음)
 ├── bin/
 │   └── archimate-infra.ts       CDK 앱 진입점 (스택 1개를 만든다)
 ├── lib/
@@ -161,7 +162,7 @@ ArchiMate-InfraStructure_IaC/
 │   └── budget.ts                AWS Budgets
 ├── lambda-stub/archimate/handlers/   더미 핸들러 (백엔드 코드와 같은 모듈 경로)
 ├── web-placeholder/index.html   프론트 결과물이 없을 때 올리는 임시 페이지
-├── test/                        Jest 테스트 (lib/ 파일마다 1개)
+├── test/                        Jest 테스트 (lib/ 파일마다 1개, jest.setup.ts는 테스트 전 설정)
 ├── cdk.json                     CDK 실행 설정, feature flag
 ├── package.json · tsconfig.json · jest.config.js
 ├── .env.example                 CDK 실행 옵션 안내 (값은 비움)
