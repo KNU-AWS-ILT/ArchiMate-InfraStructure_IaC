@@ -55,10 +55,10 @@ describe('loadConfig', () => {
     expect(config.lambdaCodePath).toMatch(/lambda-stub$/);
   });
 
-  it('-c lambdaCode=backend이면 백엔드 레포의 src를 쓴다', () => {
+  it('-c lambdaCode=backend이면 백엔드 레포의 build/lambda 번들을 쓴다', () => {
     const config = loadConfig(new App({ context: { lambdaCode: 'backend', backendPath: '../ArchiMate-Backend' } }));
     expect(config.lambdaCodeSource).toBe('backend');
-    expect(config.lambdaCodePath).toMatch(/ArchiMate-Backend[\\/]src$/);
+    expect(config.lambdaCodePath).toMatch(/ArchiMate-Backend[\\/]build[\\/]lambda$/);
   });
 
   it('lambdaCode에 stub·backend 외의 값은 거부한다', () => {

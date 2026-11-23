@@ -146,8 +146,32 @@ describe('제한 시간', () => {
     expect(functionByName(EXPLAIN).resource.Properties.Timeout).toBe(25);
   });
 
-  it('sync_prices 300초 (명세 없음, 임시값)', () => {
-    expect(functionByName(SYNC_PRICES).resource.Properties.Timeout).toBe(300);
+  it('sync_prices 30초 (백엔드 #15 확정, PR #39: 스냅샷을 쓰기만 함)', () => {
+    expect(functionByName(SYNC_PRICES).resource.Properties.Timeout).toBe(30);
+  });
+});
+
+describe('메모리', () => {
+  // Lambda 기본값. 템플릿에 MemorySize가 없으면 이 값이 적용된다.
+  const LAMBDA_DEFAULT_MB = 128;
+  const memoryOf = (name: string): number | undefined => functionByName(name).resource.Properties.MemorySize;
+
+  it('generate 512MB (FastAPI·pydantic·anthropic SDK import만으로 약 100MB, IaC PR #8 리뷰)', () => {
+    expect(memoryOf(GENERATE)).toBe(512);
+  });
+
+  it('explain 512MB', () => {
+    expect(memoryOf(EXPLAIN)).toBe(512);
+  });
+
+  it('sync_prices는 Lambda 기본값(128MB) 그대로다. 메모리를 지정하지 않는다', () => {
+    expect(memoryOf(SYNC_PRICES)).toBeUndefined();
+    expect(memoryOf(SYNC_PRICES) ?? LAMBDA_DEFAULT_MB).toBe(128);
+  });
+
+  it('generate·explain만 기본값보다 크다', () => {
+    const larger = [GENERATE, EXPLAIN, SYNC_PRICES].filter((name) => (memoryOf(name) ?? LAMBDA_DEFAULT_MB) > LAMBDA_DEFAULT_MB);
+    expect(larger.sort()).toEqual([EXPLAIN, GENERATE].sort());
   });
 });
 

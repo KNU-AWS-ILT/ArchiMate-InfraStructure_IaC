@@ -59,8 +59,19 @@ export const LAMBDA_HANDLERS = {
 export const LAMBDA_TIMEOUT_SECONDS = {
   generate: 180,
   explain: 25,
-  // 명세에 없음. 기본값 3초로는 Price List API 호출이 끝나지 않아 임시로 300초로 둔다. (백엔드(API·비용) 확인 필요)
-  syncPrices: 300,
+  // 백엔드 #15 확정(PR #39): sync_prices는 Price List API를 호출하지 않고 스냅샷을 DynamoDB에 쓰기만 해서 30초면 충분하다.
+  syncPrices: 30,
+} as const;
+
+/**
+ * Lambda 메모리(MB). generate와 explain은 512MB다.
+ * 근거: FastAPI, pydantic, anthropic SDK를 불러오기만 해도 약 100MB를 쓴다. Lambda 기본값(128MB)이면
+ * 메모리가 부족해 강제 종료되고, 그러면 job이 running 상태로 남는다. (IaC PR #8 리뷰, dev-sohyeon)
+ * sync_prices는 스냅샷을 DynamoDB에 쓰기만 해서 Lambda 기본값(128MB)을 그대로 쓴다. 그래서 여기에 넣지 않고 메모리를 지정하지 않는다.
+ */
+export const LAMBDA_MEMORY_MB = {
+  generate: 512,
+  explain: 512,
 } as const;
 
 /** 테이블 이름을 Lambda에 넘기는 환경 변수 이름. 백엔드 #15. 각 Lambda에는 필요한 것만 넘긴다. */
@@ -90,7 +101,7 @@ export const API_THROTTLE = {
   burstLimit: 20,
 } as const;
 
-/** Lambda 코드 위치. `stub`은 IaC 레포 안의 더미, `backend`는 백엔드 레포의 `src/`. */
+/** Lambda 코드 위치. `stub`은 IaC 레포 안의 더미, `backend`는 백엔드 레포의 `build/lambda` 번들. */
 export type LambdaCodeSource = 'stub' | 'backend';
 
 /** IaC 레포 안의 더미 핸들러 폴더. 백엔드 코드가 main에 올라오기 전까지 쓴다. */
@@ -124,8 +135,7 @@ export interface ArchimateConfig {
   /** Lambda 코드 출처 (`-c lambdaCode=stub|backend`, 기본 stub) */
   readonly lambdaCodeSource: LambdaCodeSource;
   /**
-   * Lambda 코드 폴더(`archimate/` 패키지의 부모). stub이면 `lambda-stub/`, backend이면 `<backendPath>/src`.
-   * pip 의존성 번들은 6단계에서 추가한다.
+   * Lambda 코드 폴더(`archimate/` 패키지의 부모). stub이면 `lambda-stub/`, backend이면 `<backendPath>/build/lambda` (배포 전에 백엔드에서 `python scripts/build_lambda.py`로 만든 ARM64 번들, 백엔드 PR #40).
    */
   readonly lambdaCodePath: string;
   /** LLM 제공자 (`-c llmProvider=bedrock|mock`, 기본 bedrock) */
@@ -179,7 +189,7 @@ export function loadConfig(app: App): ArchimateConfig {
     webSourcePath: fs.existsSync(path.join(webAssetPath, 'index.html')) ? webAssetPath : WEB_PLACEHOLDER_PATH,
     bedrockModelIds: BEDROCK_MODEL_IDS,
     lambdaCodeSource,
-    lambdaCodePath: lambdaCodeSource === 'backend' ? path.join(backendPath, 'src') : LAMBDA_STUB_PATH,
+    lambdaCodePath: lambdaCodeSource === 'backend' ? path.join(backendPath, 'build', 'lambda') : LAMBDA_STUB_PATH,
     llmProvider,
   };
 }

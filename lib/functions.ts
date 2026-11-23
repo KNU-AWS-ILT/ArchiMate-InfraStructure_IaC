@@ -6,6 +6,7 @@ import { Construct } from 'constructs';
 import {
   ArchimateConfig,
   LAMBDA_HANDLERS,
+  LAMBDA_MEMORY_MB,
   LAMBDA_TIMEOUT_SECONDS,
   TABLE_ENV_VARS,
   resourceName,
@@ -22,8 +23,8 @@ export interface FunctionsProps {
  *
  * 공통: Python 3.12, ARM64, 로그 보존 2주(삭제 정책 DESTROY).
  * 코드는 `config.lambdaCodePath`에서 묶는다. 지금은 IaC 레포의 더미(lambda-stub)이고,
- * `-c lambdaCode=backend`로 백엔드 레포 `src/`로 바꾼다. (pip 의존성 번들은 6단계)
- * 메모리는 명세가 없어 Lambda 기본값(128MB)이다.
+ * `-c lambdaCode=backend`로 백엔드 레포 `build/lambda`(백엔드 `scripts/build_lambda.py`로 만든 ARM64 번들, 백엔드 PR #40)로 바꾼다.
+ * 메모리: generate·explain은 512MB(근거는 config.ts의 LAMBDA_MEMORY_MB), sync_prices는 Lambda 기본값(128MB)이다.
  * EventBridge 스케줄은 3-6에서 만든다.
  */
 export class Functions extends Construct {
@@ -47,6 +48,8 @@ export class Functions extends Construct {
       handler: string,
       timeoutSeconds: number,
       environment: Record<string, string>,
+      // 지정하지 않으면 Lambda 기본값(128MB)
+      memorySize?: number,
     ): LambdaFunction => {
       const functionName = resourceName(stage, 'lambda', purpose);
       return new LambdaFunction(this, constructId, {
@@ -56,6 +59,7 @@ export class Functions extends Construct {
         handler,
         code,
         timeout: Duration.seconds(timeoutSeconds),
+        memorySize,
         environment,
         logGroup: new LogGroup(this, `${constructId}Logs`, {
           logGroupName: `/aws/lambda/${functionName}`,
@@ -83,6 +87,7 @@ export class Functions extends Construct {
         LLM_PROVIDER: config.llmProvider,
         LLM_MODEL: config.bedrockModelIds.design,
       },
+      LAMBDA_MEMORY_MB.generate,
     );
     data.designs.grantReadWriteData(this.generate);
     data.prices.grantReadData(this.generate);
@@ -122,11 +127,12 @@ export class Functions extends Construct {
         LLM_PROVIDER: config.llmProvider,
         LLM_EXPLAIN_MODEL: config.bedrockModelIds.explain,
       },
+      LAMBDA_MEMORY_MB.explain,
     );
     data.designs.grantReadData(this.explain);
     data.explanations.grantReadWriteData(this.explain);
 
-    // 단가 동기화: prices 쓰기만. LLM 환경 변수 없음.
+    // 단가 동기화: prices 쓰기만. LLM 환경 변수 없음. 메모리는 지정하지 않는다(Lambda 기본값 128MB).
     this.syncPrices = createFunction(
       'SyncPrices',
       'sync-prices',
@@ -136,6 +142,7 @@ export class Functions extends Construct {
     );
     data.prices.grantWriteData(this.syncPrices);
     // Price List API는 리소스 단위 권한을 지원하지 않아 '*'를 쓴다. 호출 리전(us-east-1)은 코드에서 지정한다.
+    // 지금 백엔드(PR #39)는 Price List API를 호출하지 않고 스냅샷만 쓰지만, 나중 연동용으로 이 권한은 그대로 둔다. (IaC PR #8 리뷰)
     this.syncPrices.addToRolePolicy(
       new PolicyStatement({
         actions: ['pricing:GetProducts', 'pricing:DescribeServices', 'pricing:GetAttributeValues'],
