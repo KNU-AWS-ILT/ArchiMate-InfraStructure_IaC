@@ -25,8 +25,8 @@
 > 요청을 받는 REST API(리전 엔드포인트)와 Lambda 3개를 만듭니다. 모든 라우트는 Lambda 프록시 통합이며, Cognito 로그인 토큰을 API Gateway에서 먼저 확인합니다.
 > - **설계 생성 `generate`** (제한 시간 180초): `POST /api/v1/designs`를 받으면 jobId를 저장하고, **자기 자신을 비동기로 호출한 뒤 바로 `202 { jobId }`로 응답**합니다. 같은 Lambda가 작업 상태 조회와 운영 절차 조회도 처리합니다. 비동기 호출 재시도는 끕니다. 백엔드 코드가 안에서 재시도하므로, AWS가 다시 실행하면 LLM 호출이 중복되기 때문입니다. **(백엔드 #15에서 확정)**
 > - **노드 설명 `explain`** (제한 시간 25초): `GET .../nodes/{nodeId}/explanation`을 처리합니다. 소형 모델 ID는 환경 변수 `LLM_EXPLAIN_MODEL`로 받습니다.
-> - **단가 동기화 `sync_prices`** (제한 시간 300초 **(임시값)**): EventBridge가 **매일 한국 시간 03:00(UTC 18:00) (임시값)**에 실행해 Price List API(us-east-1)의 단가를 `prices` 테이블에 덮어씁니다.
-> - 공통: Python 3.12, ARM64, 로그 보존 2주(스택을 지우면 로그도 삭제), 메모리는 Lambda 기본값(128MB). Lambda마다 **필요한 테이블 권한만** 줍니다. (`generate`: designs 읽기·쓰기 + prices 읽기, `explain`: designs 읽기 + explanations 읽기·쓰기, `sync_prices`: prices 쓰기)
+> - **단가 동기화 `sync_prices`** (제한 시간 30초, 백엔드 #15 확정): EventBridge가 **매일 한국 시간 03:00(UTC 18:00) (임시값)**에 실행해 단가를 `prices` 테이블에 씁니다. 지금 백엔드(PR #39)는 Price List API를 호출하지 않고 스냅샷을 쓰기만 해서 30초면 충분합니다. Price List API 권한(`pricing:*`)은 나중 연동용으로 남겨 두었습니다.
+> - 공통: Python 3.12, ARM64, 로그 보존 2주(스택을 지우면 로그도 삭제), 메모리는 `generate`·`explain` **512MB**, `sync_prices`는 Lambda 기본값(128MB)입니다. FastAPI·pydantic·anthropic SDK를 불러오기만 해도 약 100MB를 써서, 128MB로는 메모리 부족으로 강제 종료되고 job이 running에 남기 때문입니다. Lambda마다 **필요한 테이블 권한만** 줍니다. (`generate`: designs 읽기·쓰기 + prices 읽기, `explain`: designs 읽기 + explanations 읽기·쓰기, `sync_prices`: prices 쓰기)
 > - Bedrock은 bedrock-mantle의 Messages API로 호출합니다. `generate`와 `explain`에 **`bedrock-mantle:CreateInference` 권한 하나만** 줍니다. 모델 ID는 `anthropic.claude-opus-5-5`(설계), `anthropic.claude-haiku-5-5`(설명)이며, 서울은 Global 엔드포인트라 `global.` 같은 리전 접두사를 붙이지 않습니다. 모델 리소스 ARN 형식이 문서에 없어서 권한 범위는 지금 **모든 모델(`*`)입니다 (임시값)**. ARN 형식을 확인한 뒤 두 모델로 좁히고, 실배포 전에 확인합니다. (백엔드 #15 syd348 정정)
 > - 스로틀: 모든 경로에 초당 10회, 순간 20회 **(임시값)**. Bedrock 비용이 갑자기 늘지 않게 막는 용도입니다.
 > - CORS는 설정하지 않습니다. 프론트가 같은 주소(CloudFront)의 `/api/v1`만 호출하기 때문입니다.
@@ -47,7 +47,7 @@
 >
 > ※ 위 4개 라우트는 모두 API Gateway의 Cognito Authorizer를 거칩니다.
 >
-> EventBridge (매일 03:00 KST) ──▶ sync_prices Lambda ──▶ Price List API (us-east-1) ──▶ DynamoDB prices (쓰기)
+> EventBridge (매일 03:00 KST) ──▶ sync_prices Lambda ──▶ DynamoDB prices (쓰기, 지금은 패키지 단가 스냅샷)
 > ```
 
 ### 2. 정적 웹 배포 (S3 + CloudFront)
@@ -126,7 +126,7 @@ CloudFront ─┬─ /*     ─▶ S3 (프론트 정적 파일, 비공개 + OAC)
                                                                               ─▶ explain Lambda ───┬─▶ DynamoDB (designs, explanations)
                                                                                                    └─▶ Bedrock (소형 모델)
 
-EventBridge (매일 03:00 KST, 임시값) ─▶ sync_prices Lambda ─▶ Price List API (us-east-1) ─▶ DynamoDB (prices)
+EventBridge (매일 03:00 KST, 임시값) ─▶ sync_prices Lambda ─▶ DynamoDB (prices, 지금은 패키지 단가 스냅샷)
 AWS Budgets (월 30 USD) ─▶ 이메일 알림
 ```
 
@@ -193,7 +193,7 @@ npx cdk synth           # CloudFormation 템플릿 생성 (cdk.out/)
 > | :--- | :--- | :--- |
 > | `stage` | 스테이지 이름. 리소스 이름과 `Environment` 태그, CloudFront 오리진 경로에 쓰임 | `demo` |
 > | `alertEmail` | Budgets 알림 이메일. 없으면 Budgets를 만들지 않음 | 없음 |
-> | `lambdaCode` | Lambda 코드 출처. `stub`(레포 안 더미) 또는 `backend`(백엔드 레포 `src/`) | `stub` |
+> | `lambdaCode` | Lambda 코드 출처. `stub`(레포 안 더미) 또는 `backend`(백엔드 레포 `build/lambda`) | `stub` |
 > | `backendPath` | 백엔드 레포 경로 | `../ArchiMate-Backend` |
 > | `webAssetPath` | 프론트 정적 내보내기 결과물 경로. `index.html`이 없으면 플레이스홀더를 올림 | `../ArchiMate-Frontend/out` |
 > | `llmProvider` | `bedrock` 또는 `mock` (개발 중 배포는 `mock`) | `bedrock` |
@@ -202,7 +202,7 @@ npx cdk synth           # CloudFormation 템플릿 생성 (cdk.out/)
 
 > 먼저 준비할 것: AWS 계정(Free 플랜), Bedrock 콘솔에서 Anthropic 모델 사용 신청, 서울 리전에서 모델 ID 호출 확인과 bedrock-mantle 모델 ARN 형식 확인(IAM 범위 `*`를 두 모델로 좁히기), 프론트 정적 내보내기 결과물.
 > **`-c alertEmail`은 반드시 넘깁니다.** 빠뜨리면 Budgets 없이 배포됩니다.
-> 백엔드 코드의 pip 의존성 번들은 아직 구현 전입니다. 지금의 `-c lambdaCode=backend`는 백엔드 `src/` 폴더만 묶습니다.
+> `-c lambdaCode=backend`로 배포하기 전에 백엔드 레포에서 `python scripts/build_lambda.py`를 실행해 `build/lambda`(의존성 포함 ARM64 번들)를 만들어야 합니다. (백엔드 PR #40)
 
 ```shell
 npx cdk bootstrap                                             # 계정·리전당 최초 1회
