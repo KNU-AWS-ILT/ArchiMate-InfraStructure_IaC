@@ -22,7 +22,7 @@
 
 * **기능 소개**
 
-> 요청을 받는 REST API(리전 엔드포인트)와 Lambda 3개를 만듭니다. 모든 라우트는 Lambda 프록시 통합이며, Cognito 로그인 토큰을 API Gateway에서 먼저 확인합니다.
+> 요청을 받는 REST API(리전 엔드포인트)와 Lambda 3개를 만듭니다. 모든 라우트는 Lambda 프록시 통합이며, Cognito ID 토큰을 API Gateway에서 먼저 확인합니다.
 > - **설계 생성 `generate`** (제한 시간 180초): `POST /api/v1/designs`를 받으면 jobId를 저장하고, **자기 자신을 비동기로 호출한 뒤 바로 `202 { jobId }`로 응답**합니다. 같은 Lambda가 작업 상태 조회와 운영 절차 조회도 처리합니다. 비동기 호출 재시도는 끕니다. 백엔드 코드가 안에서 재시도하므로, AWS가 다시 실행하면 LLM 호출이 중복되기 때문입니다. **(백엔드 #15에서 확정)**
 > - **노드 설명 `explain`** (제한 시간 25초): `GET .../nodes/{nodeId}/explanation`을 처리합니다. 소형 모델 ID는 환경 변수 `LLM_EXPLAIN_MODEL`로 받습니다.
 > - **단가 동기화 `sync_prices`** (제한 시간 30초, 백엔드 #15 확정): EventBridge가 **매일 한국 시간 03:00(UTC 18:00) (임시값)**에 실행해 단가를 `prices` 테이블에 씁니다. 지금 백엔드(PR #39)는 Price List API를 호출하지 않고 스냅샷을 쓰기만 해서 30초면 충분합니다. Price List API 권한(`pricing:*`)은 나중 연동용으로 남겨 두었습니다.
@@ -82,14 +82,20 @@
 >   - `prices`: 파티션 키 `service` + 정렬 키 `regionUsageType`, TTL 없음(매일 덮어씀)
 >   - `explanations`: 파티션 키 `designId` + 정렬 키 `nodeId`, TTL `expiresAt`
 >   - 키 구조와 TTL 속성 이름은 백엔드 #15에서 확정했습니다. 만료 시각 계산은 Lambda가 합니다.
-> - **Cognito**: User Pool과 SPA용 앱 클라이언트(client secret 없음)를 만들고, `userPoolId`, `userPoolClientId`를 출력값으로 내보냅니다. 로그인 방식(SDK 직접 로그인 / Hosted UI), 자가 가입, 로그인 아이디(이메일 / 사용자 이름)는 프론트·PM 회신을 기다리는 중이라 **CDK 기본값**입니다.
+> - **Cognito** (IaC #4에서 프론트(HJTN)가 정한 방식): User Pool, **Cognito 호스팅 로그인 페이지**(접두사 도메인 `archimate-demo-knu`), SPA용 앱 클라이언트를 만듭니다.
+>   - 로그인 아이디는 **이메일만**이고 **직접 가입은 없습니다.** 팀 계정 1개는 배포 후에 CLI로 만듭니다. (CDK로 만들면 비밀번호가 템플릿에 남아서 만들지 않습니다. 아래 "막바지 AWS 배포" 참고)
+>   - 앱 클라이언트는 시크릿이 없고 **Authorization code grant만** 씁니다(implicit 끔). 범위는 `openid`·`email`·`profile`, 로그인 제공자는 Cognito뿐입니다.
+>   - 로그인·로그아웃 뒤 돌아올 주소는 `http://localhost:3000/`과 CloudFront 주소(`https://<CloudFront 도메인>/`) 둘 다입니다. 앱 클라이언트는 CloudFront 주소가 필요해서 웹(S3·CloudFront)을 만든 다음에 만듭니다. (순환 참조 방지)
+>   - 도메인 접두사는 같은 리전에서 유일해야 합니다. 이미 쓰인 이름이면 배포가 실패하므로 `-c cognitoDomainPrefix=<다른 이름>`으로 바꿉니다.
+>   - 출력값 `userPoolId`, `userPoolClientId`, `region`, `cognitoDomain`은 프론트 환경 변수 4개(`NEXT_PUBLIC_COGNITO_USER_POOL_ID`, `NEXT_PUBLIC_COGNITO_CLIENT_ID`, `NEXT_PUBLIC_COGNITO_REGION`, `NEXT_PUBLIC_COGNITO_DOMAIN`)에 넣습니다. 1차 배포 후 프론트에 전달합니다.
+>   - API Gateway의 Cognito Authorizer는 **ID 토큰**을 받습니다. 프론트는 ID 토큰을 `Authorization` 헤더에 넣습니다. (`Bearer ` 접두사가 필요한지는 배포 후 확인)
 > - **AWS Budgets**: 월 **30 USD**, 실제 비용 50%·80%, 예측 비용 100%에 이메일을 보냅니다. 운영 알림은 Budgets뿐이며 CloudWatch 알람·대시보드·SNS 토픽은 만들지 않습니다. (백엔드 #7) 알림 받을 이메일(`-c alertEmail`)이 없으면 Budgets를 만들지 않고 synth 경고만 냅니다. Budgets는 계정 전체 비용을 기준으로 합니다.
 
 * **구성도**
 
 > ```text
-> 사용자 로그인 ──▶ Cognito User Pool (앱 클라이언트: SPA용, secret 없음)
->                       │ 토큰 확인
+> 사용자 로그인 ──▶ Cognito 호스팅 로그인 페이지 + User Pool (이메일 로그인, 앱 클라이언트: secret 없음)
+>                       │ ID 토큰 확인
 >                       ▼
 >                 API Gateway ──▶ Lambda ──▶ DynamoDB
 >                                              ├─ designs        jobId                  (PITR, TTL)
@@ -153,7 +159,7 @@ ArchiMate-InfraStructure_IaC/
 │   ├── archimate-stack.ts       스택 조립 (아래 구성 요소를 연결하고 태그 3종을 붙인다)
 │   ├── config.ts                설정 (리전, 스테이지, 모델 ID, 예산, 스로틀, 스케줄, 경로, 이름 규칙 함수)
 │   ├── data.ts                  DynamoDB 테이블 3개
-│   ├── auth.ts                  Cognito User Pool, 앱 클라이언트
+│   ├── auth.ts                  Cognito User Pool, 호스팅 로그인 도메인, 앱 클라이언트
 │   ├── functions.ts             Lambda 3개, IAM 권한, 환경 변수
 │   ├── api.ts                   API Gateway, Cognito Authorizer, 게이트웨이 오류 응답
 │   ├── web.ts                   S3, CloudFront, CloudFront Function, 프론트 업로드·캐시 무효화
@@ -196,6 +202,7 @@ npx cdk synth           # CloudFormation 템플릿 생성 (cdk.out/)
 > | `backendPath` | 백엔드 레포 경로 | `../ArchiMate-Backend` |
 > | `webAssetPath` | 프론트 정적 내보내기 결과물 경로. `index.html`이 없으면 플레이스홀더를 올림 | `../ArchiMate-Frontend/out` |
 > | `llmProvider` | `bedrock` 또는 `mock` (개발 중 배포는 `mock`) | `bedrock` |
+> | `cognitoDomainPrefix` | Cognito 호스팅 로그인 도메인 접두사. 같은 리전에서 유일해야 하고, 소문자·숫자·하이픈 1~63자이며 `aws`·`amazon`·`cognito`는 넣을 수 없음 | `archimate-{stage}-knu` (`demo`이면 `archimate-demo-knu`) |
 
 ### 2. 막바지 AWS 배포 (발표 1주 전)
 
@@ -208,7 +215,21 @@ npx cdk bootstrap                                             # 계정·리전�
 npx cdk deploy -c alertEmail=<알림 받을 이메일> -c lambdaCode=backend -c backendPath=<백엔드 레포 경로> -c webAssetPath=<프론트 out 경로>
 ```
 
-> 배포가 끝나면 출력값 `cloudFrontUrl`(접속 주소), `userPoolId`, `userPoolClientId`가 나옵니다. Budgets 구독 확인 메일을 확인하고, 접속 주소에서 로그인 → 3안 생성 → 노드 설명 → 운영 절차까지 동작하는지 봅니다.
+> 배포가 끝나면 출력값 `cloudFrontUrl`(접속 주소), `userPoolId`, `userPoolClientId`, `region`, `cognitoDomain`이 나옵니다. 마지막 4개는 프론트 환경 변수에 넣으므로 프론트에 전달합니다.
+>
+> **배포 직후: 팀 로그인 계정 1개 만들기.** 직접 가입이 없어서, 배포가 끝나면 아래 두 명령으로 계정을 만듭니다. 비밀번호는 문서나 코드에 적지 않고, 명령을 칠 때만 입력합니다. (셸 기록에 남지 않게 주의)
+>
+> ```shell
+> # 1) 계정 만들기 (이메일 확인 완료로 표시, 안내 메일은 보내지 않음)
+> aws cognito-idp admin-create-user --region ap-northeast-2 --user-pool-id <userPoolId> --username <팀 이메일> --user-attributes Name=email,Value=<팀 이메일> Name=email_verified,Value=true --message-action SUPPRESS
+>
+> # 2) 비밀번호를 영구로 지정 (임시 비밀번호 변경 절차 건너뜀)
+> aws cognito-idp admin-set-user-password --region ap-northeast-2 --user-pool-id <userPoolId> --username <팀 이메일> --password "<비밀번호>" --permanent
+> ```
+>
+> 비밀번호는 Cognito 기본 정책(8자 이상, 대·소문자·숫자·기호)을 따라야 합니다. 이 두 명령에는 AWS 자격 증명이 필요하므로 배포한 사람이 실행합니다.
+>
+> Budgets 구독 확인 메일을 확인하고, 접속 주소에서 로그인 → 3안 생성 → 노드 설명 → 운영 절차까지 동작하는지 봅니다.
 > 이 배포는 나중에 수동 실행(GitHub Actions `workflow_dispatch`)으로도 할 수 있게 만들 예정입니다. 그때도 장기 액세스 키 대신 OIDC로 인증하는 것이 원칙입니다.
 
 ### 3. 발표 직후: 삭제
@@ -229,7 +250,7 @@ npx cdk destroy
 | 스택 | 주요 리소스 | 주요 기능 |
 | :--- | :---: | :--- |
 | `archimate-demo` | DynamoDB 3개 (`designs`, `prices`, `explanations`) | 설계 결과, 단가, 노드 설명 캐시 저장. 모두 온디맨드 |
-| `archimate-demo` | Cognito User Pool 1개, 앱 클라이언트 1개 | 로그인 토큰 발급 (API 호출 전 인증) |
+| `archimate-demo` | Cognito User Pool 1개, 호스팅 로그인 도메인 1개, 앱 클라이언트 1개 | 이메일 로그인(호스팅 페이지), ID 토큰 발급 (API 호출 전 인증) |
 | `archimate-demo` | Lambda 3개 (`generate`, `explain`, `sync_prices`), 로그 그룹 3개 | 3안 생성·조회, 노드 설명, 단가 동기화. (CDK가 S3 업로드·자동 삭제용 도우미 Lambda를 2개 더 만듦) |
 | `archimate-demo` | API Gateway REST API 1개, Authorizer 1개, 라우트 4개, 게이트웨이 오류 응답 6종 | `/api/v1/...` 요청 접수와 인증, 오류 응답 형식 통일 |
 | `archimate-demo` | S3 버킷 1개, CloudFront 배포 1개, CloudFront Function 1개, OAC 1개 | 프론트 정적 파일 서비스, `/api/*`를 API Gateway로 전달 |
