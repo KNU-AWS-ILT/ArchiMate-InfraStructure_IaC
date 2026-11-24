@@ -39,17 +39,32 @@ export class ArchimateStack extends Stack {
     this.api = new Api(this, 'Api', { config: props.config, auth: this.auth, functions: this.functions });
     this.web = new Web(this, 'Web', { config: props.config, api: this.api });
     addWebOutputs(this, this.web);
+    // 앱 클라이언트는 CloudFront 주소를 callback·logout 주소로 쓰므로 Web 다음에 만든다. (순환 참조 방지)
+    this.auth.addWebClient(this.web.distribution.distributionDomainName);
     this.schedule = new PriceSyncSchedule(this, 'Schedule', { config: props.config, functions: this.functions });
     this.budget = new Budget(this, 'Budget', { config: props.config });
 
-    // 프론트에 전달하는 공개 값. 출력 이름은 camelCase. (프론트 전달 방식은 협의 필요, Task.md 3-3)
+    // 프론트에 전달하는 공개 값. 출력 이름은 camelCase. (cloudFrontUrl은 addWebOutputs에서 이미 만든다)
+    // 1차 배포 후 이 값을 프론트의 환경 변수 4개에 넣는다. (IaC #4, HJTN)
+    //   NEXT_PUBLIC_COGNITO_USER_POOL_ID = userPoolId
+    //   NEXT_PUBLIC_COGNITO_CLIENT_ID    = userPoolClientId
+    //   NEXT_PUBLIC_COGNITO_REGION       = region
+    //   NEXT_PUBLIC_COGNITO_DOMAIN       = cognitoDomain
     new CfnOutput(this, 'userPoolId', {
       value: this.auth.userPool.userPoolId,
-      description: 'Cognito User Pool ID',
+      description: 'Cognito User Pool ID → NEXT_PUBLIC_COGNITO_USER_POOL_ID',
     });
     new CfnOutput(this, 'userPoolClientId', {
       value: this.auth.userPoolClient.userPoolClientId,
-      description: 'Cognito 앱 클라이언트 ID (SPA용, secret 없음)',
+      description: 'Cognito 앱 클라이언트 ID (SPA용, secret 없음) → NEXT_PUBLIC_COGNITO_CLIENT_ID',
+    });
+    new CfnOutput(this, 'region', {
+      value: this.region,
+      description: 'AWS 리전 → NEXT_PUBLIC_COGNITO_REGION',
+    });
+    new CfnOutput(this, 'cognitoDomain', {
+      value: this.auth.domainName,
+      description: 'Cognito 호스팅 로그인 도메인 (https:// 없음) → NEXT_PUBLIC_COGNITO_DOMAIN',
     });
 
     // 스택 안의 모든 리소스에 태그가 전파된다. [conventions 11번]

@@ -110,6 +110,43 @@ export const LAMBDA_STUB_PATH = path.resolve(__dirname, '..', 'lambda-stub');
 /** 프론트 결과물(index.html)이 없을 때 올리는 플레이스홀더 페이지 폴더 */
 export const WEB_PLACEHOLDER_PATH = path.resolve(__dirname, '..', 'web-placeholder');
 
+/**
+ * 로컬 개발 서버 주소. Cognito 로그인 뒤 돌아올 주소(callback)와 로그아웃 뒤 주소(logout)에 CloudFront 주소와 함께 쓴다.
+ * (IaC #4, HJTN 결정)
+ */
+export const LOCAL_WEB_URL = 'http://localhost:3000/';
+
+/**
+ * Cognito 호스팅 로그인 도메인 접두사의 기본값. 스테이지가 demo이면 `archimate-demo-knu`다.
+ * 접두사는 같은 리전의 모든 AWS 계정에서 유일해야 한다. 이미 쓰인 이름이면 배포가 실패하므로 그때
+ * `-c cognitoDomainPrefix=<다른 이름>`으로 바꾼다. 스테이지를 따라가게 해서 스테이지끼리 겹치지 않게 했다.
+ */
+export function defaultCognitoDomainPrefix(stage: string): string {
+  return `archimate-${stage}-knu`;
+}
+
+/** Cognito 접두사 도메인 형식 (CreateUserPoolDomain API 레퍼런스): 1~63자, 소문자·숫자·하이픈, 처음과 끝은 소문자·숫자 */
+const COGNITO_DOMAIN_PREFIX_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+/**
+ * 접두사에 넣지 못하게 막는 단어. "aws·amazon·cognito 금지" 규칙은 요청에 따라 합성 단계에서 막는다.
+ * 확인 한계: 공식 문서(API 레퍼런스)에서는 위 형식만 확인했고, 이 단어 규칙은 문서에서 찾지 못했다.
+ */
+const COGNITO_RESERVED_WORDS = ['aws', 'amazon', 'cognito'] as const;
+
+function validateCognitoDomainPrefix(prefix: string): void {
+  if (!COGNITO_DOMAIN_PREFIX_PATTERN.test(prefix)) {
+    throw new Error(
+      `cognitoDomainPrefix "${prefix}"는 소문자·숫자·하이픈만 쓸 수 있고, 1~63자이며, 처음과 끝은 소문자나 숫자여야 합니다.`,
+    );
+  }
+  const word = COGNITO_RESERVED_WORDS.find((w) => prefix.includes(w));
+  if (word) {
+    throw new Error(
+      `cognitoDomainPrefix "${prefix}"에는 "${word}"를 넣을 수 없습니다. (aws·amazon·cognito 금지) -c cognitoDomainPrefix=<다른 이름>으로 바꾸세요.`,
+    );
+  }
+}
+
 export interface ArchimateConfig {
   readonly region: string;
   /** 스테이지 이름. 리소스 이름과 Environment 태그에 쓰인다. */
@@ -140,6 +177,8 @@ export interface ArchimateConfig {
   readonly lambdaCodePath: string;
   /** LLM 제공자 (`-c llmProvider=bedrock|mock`, 기본 bedrock) */
   readonly llmProvider: string;
+  /** Cognito 호스팅 로그인 도메인 접두사 (`-c cognitoDomainPrefix=...`, 기본 `archimate-{stage}-knu`) */
+  readonly cognitoDomainPrefix: string;
 }
 
 const STAGE_PATTERN = /^[a-z][a-z0-9-]{0,14}$/;
@@ -175,6 +214,8 @@ export function loadConfig(app: App): ArchimateConfig {
   if (!(LLM_PROVIDERS as readonly string[]).includes(llmProvider)) {
     throw new Error(`llmProvider "${llmProvider}"는 ${LLM_PROVIDERS.join(' 또는 ')}만 쓸 수 있습니다.`);
   }
+  const cognitoDomainPrefix = readString(app, 'cognitoDomainPrefix') ?? defaultCognitoDomainPrefix(stage);
+  validateCognitoDomainPrefix(cognitoDomainPrefix);
   const backendPath = path.resolve(readString(app, 'backendPath') ?? '../ArchiMate-Backend');
   const webAssetPath = path.resolve(readString(app, 'webAssetPath') ?? '../ArchiMate-Frontend/out');
 
@@ -191,6 +232,7 @@ export function loadConfig(app: App): ArchimateConfig {
     lambdaCodeSource,
     lambdaCodePath: lambdaCodeSource === 'backend' ? path.join(backendPath, 'build', 'lambda') : LAMBDA_STUB_PATH,
     llmProvider,
+    cognitoDomainPrefix,
   };
 }
 

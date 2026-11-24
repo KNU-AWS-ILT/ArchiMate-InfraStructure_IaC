@@ -49,6 +49,49 @@ describe('loadConfig', () => {
     expect(Object.keys(config).filter((key) => /foundation|inferenceProfile/i.test(key))).toEqual([]);
   });
 
+  describe('Cognito 도메인 접두사(cognitoDomainPrefix)', () => {
+    const load = (cognitoDomainPrefix?: string, stage?: string) =>
+      loadConfig(new App({ context: { ...(cognitoDomainPrefix ? { cognitoDomainPrefix } : {}), ...(stage ? { stage } : {}) } }));
+
+    it('기본값은 archimate-demo-knu다', () => {
+      expect(load().cognitoDomainPrefix).toBe('archimate-demo-knu');
+    });
+
+    it('기본값은 스테이지를 따라간다', () => {
+      expect(load(undefined, 'test').cognitoDomainPrefix).toBe('archimate-test-knu');
+    });
+
+    it('-c cognitoDomainPrefix로 바꿀 수 있다', () => {
+      expect(load('archimate-team4-web').cognitoDomainPrefix).toBe('archimate-team4-web');
+    });
+
+    it.each([
+      ['대문자', 'Archimate-demo'],
+      ['밑줄', 'archimate_demo'],
+      ['점', 'archimate.demo'],
+      ['하이픈으로 시작', '-archimate'],
+      ['하이픈으로 끝남', 'archimate-'],
+      ['64자 이상', 'a'.repeat(64)],
+    ])('형식에 맞지 않으면 거부한다: %s', (_label, prefix) => {
+      expect(() => load(prefix)).toThrow(/cognitoDomainPrefix/);
+    });
+
+    it('63자까지는 허용한다', () => {
+      expect(load('a'.repeat(63)).cognitoDomainPrefix).toHaveLength(63);
+    });
+
+    it.each(['my-aws-app', 'amazon-login', 'cognito-demo', 'xxcognitoxx'])(
+      'aws·amazon·cognito가 들어간 접두사는 거부한다: %s',
+      (prefix) => {
+        expect(() => load(prefix)).toThrow(/aws·amazon·cognito/);
+      },
+    );
+
+    it('스테이지 이름에 금지 단어가 있어 기본 접두사가 걸리면, 바꾸라는 안내와 함께 거부한다', () => {
+      expect(() => load(undefined, 'aws-test')).toThrow(/-c cognitoDomainPrefix/);
+    });
+  });
+
   it('Lambda 코드는 기본으로 더미(lambda-stub)를 쓴다', () => {
     const config = loadConfig(new App());
     expect(config.lambdaCodeSource).toBe('stub');
