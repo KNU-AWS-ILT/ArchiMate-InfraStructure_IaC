@@ -2,8 +2,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { App } from 'aws-cdk-lib';
 
-/** 서울 리전. (Price List API만 us-east-1을 쓰며, 해당 Lambda 코드에서 지정한다) */
-export const REGION = 'ap-northeast-2';
+/**
+ * 배포 리전: 시드니(ap-southeast-2).
+ * 원래 서울(ap-northeast-2)이었지만, 배포 계정이 AWS 무료 플랜이라 리전이 시드니 하나로 묶여 있다.
+ * (서울은 서비스 제어 정책(SCP)으로 모든 호출이 거부됨, 2026-11-26 확인, 백엔드 #15)
+ * 유료 플랜으로 바꾸면 서울로 되돌린다. 월 비용 계산은 백엔드가 서울 단가(DEFAULT_REGION)로 하므로 결과는 같다.
+ */
+export const REGION = 'ap-southeast-2';
 
 /** 월 예산(USD). Budgets 알람 기준. */
 export const MONTHLY_BUDGET_USD = 30;

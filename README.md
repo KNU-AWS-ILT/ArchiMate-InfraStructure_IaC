@@ -15,7 +15,7 @@
 ## ✨ 인프라 핵심 기능 (Key Feature)
 
 > 이 레포는 ArchiMate를 AWS에 올리는 **AWS CDK 코드**만 담습니다. 백엔드·프론트엔드 코드는 각 레포에 있고, 배포할 때 경로(`-c backendPath`, `-c webAssetPath`)로 불러옵니다.
-> 서울 리전(`ap-northeast-2`)에 서버 없이(서버리스) 구성하고, 모든 리소스 이름은 `archimate-{스테이지}-{서비스}-{용도}`, 태그는 `Project` · `Environment` · `Owner` 3종입니다.
+> 시드니 리전(`ap-southeast-2`)에 서버 없이(서버리스) 구성하고, 모든 리소스 이름은 `archimate-{스테이지}-{서비스}-{용도}`, 태그는 `Project` · `Environment` · `Owner` 3종입니다.
 > 표시한 **(임시값)**은 명세에 없어서 인프라가 정한 값이며, 백엔드·PM과 협의 후 확정합니다.
 
 ### 1. 서버리스 API (API Gateway + Lambda 3개)
@@ -115,7 +115,7 @@
 
 ## ⚙️ 시스템 아키텍처
 
-> 서울 리전(`ap-northeast-2`), VPC 없는 서버리스 구성입니다. 스택은 `archimate-{스테이지}` 1개이고 스테이지 기본값은 `demo`입니다.
+> 시드니 리전(`ap-southeast-2`), VPC 없는 서버리스 구성입니다. (원래 서울이었지만 배포 계정이 AWS 무료 플랜이라 시드니 하나만 쓸 수 있어서 바꿨습니다. 유료 플랜이면 서울로 되돌립니다. 백엔드 #15) 스택은 `archimate-{스테이지}` 1개이고 스테이지 기본값은 `demo`입니다.
 
 ```text
 브라우저
@@ -222,10 +222,10 @@ npx cdk deploy -c alertEmail=<알림 받을 이메일> -c lambdaCode=backend -c 
 >
 > ```shell
 > # 1) 계정 만들기 (이메일 확인 완료로 표시, 안내 메일은 보내지 않음)
-> aws cognito-idp admin-create-user --region ap-northeast-2 --user-pool-id <userPoolId> --username <팀 이메일> --user-attributes Name=email,Value=<팀 이메일> Name=email_verified,Value=true --message-action SUPPRESS
+> aws cognito-idp admin-create-user --region ap-southeast-2 --user-pool-id <userPoolId> --username <팀 이메일> --user-attributes Name=email,Value=<팀 이메일> Name=email_verified,Value=true --message-action SUPPRESS
 >
 > # 2) 비밀번호를 영구로 지정 (임시 비밀번호 변경 절차 건너뜀)
-> aws cognito-idp admin-set-user-password --region ap-northeast-2 --user-pool-id <userPoolId> --username <팀 이메일> --password "<비밀번호>" --permanent
+> aws cognito-idp admin-set-user-password --region ap-southeast-2 --user-pool-id <userPoolId> --username <팀 이메일> --password "<비밀번호>" --permanent
 > ```
 >
 > 비밀번호는 Cognito 기본 정책(8자 이상, 대·소문자·숫자·기호)을 따라야 합니다. 이 두 명령에는 AWS 자격 증명이 필요하므로 배포한 사람이 실행합니다.

@@ -156,17 +156,17 @@ describe('출력값 (프론트 환경 변수 4개용)', () => {
   });
 
   it('region은 서울이다', () => {
-    expect(outputs.region.Value).toBe('ap-northeast-2');
+    expect(outputs.region.Value).toBe('ap-southeast-2');
   });
 
   it('cognitoDomain은 https:// 없는 전체 주소다', () => {
-    expect(outputs.cognitoDomain.Value).toBe('archimate-demo-knu.auth.ap-northeast-2.amazoncognito.com');
+    expect(outputs.cognitoDomain.Value).toBe('archimate-demo-knu.auth.ap-southeast-2.amazoncognito.com');
     expect(outputs.cognitoDomain.Value).not.toMatch(/^https?:/);
   });
 
   it('접두사를 바꾸면 cognitoDomain도 따라간다', () => {
     const changed = synth({ cognitoDomainPrefix: 'archimate-team4-web' }, true).toJSON().Outputs as Json;
-    expect(changed.cognitoDomain.Value).toBe('archimate-team4-web.auth.ap-northeast-2.amazoncognito.com');
+    expect(changed.cognitoDomain.Value).toBe('archimate-team4-web.auth.ap-southeast-2.amazoncognito.com');
   });
 
   it('프론트 환경 변수 이름이 출력값 설명에 적혀 있다', () => {
