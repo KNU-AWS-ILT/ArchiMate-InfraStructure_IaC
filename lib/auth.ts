@@ -36,7 +36,7 @@ export class Auth extends Construct {
   public readonly userPool: UserPool;
   /** 호스팅 로그인 도메인 (Cognito 접두사 도메인) */
   public readonly domain: UserPoolDomain;
-  /** 호스팅 로그인 도메인 전체 주소 (https:// 없음). 예: archimate-demo-knu.auth.ap-northeast-2.amazoncognito.com */
+  /** 호스팅 로그인 도메인 전체 주소 (https:// 없음). 예: archimate-demo-knu.auth.ap-southeast-2.amazoncognito.com */
   public readonly domainName: string;
 
   private client?: UserPoolClient;

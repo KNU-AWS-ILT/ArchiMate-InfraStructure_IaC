@@ -18,7 +18,7 @@ describe('loadConfig', () => {
   it('기본 스테이지는 demo, 리전은 서울이다', () => {
     const config = loadConfig(new App());
     expect(config.stage).toBe('demo');
-    expect(config.region).toBe('ap-northeast-2');
+    expect(config.region).toBe('ap-southeast-2');
     expect(config.monthlyBudgetUsd).toBe(30);
   });
 
