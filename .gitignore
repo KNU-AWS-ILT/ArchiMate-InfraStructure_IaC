@@ -1,0 +1,8 @@
+node_modules/
+cdk.out/
+.env
+
+# TypeScript 빌드 결과 (ts-node로 실행하므로 커밋하지 않음)
+*.js
+*.d.ts
+!jest.config.js
