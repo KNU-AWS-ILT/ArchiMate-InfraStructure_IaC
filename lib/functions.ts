@@ -5,6 +5,8 @@ import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import {
   ArchimateConfig,
+  CONVERSE_MODEL_IDS,
+  DAILY_GENERATION_LIMIT,
   LAMBDA_HANDLERS,
   LAMBDA_MEMORY_MB,
   LAMBDA_TIMEOUT_SECONDS,
@@ -24,7 +26,7 @@ export interface FunctionsProps {
  * 공통: Python 3.12, ARM64, 로그 보존 2주(삭제 정책 DESTROY).
  * 코드는 `config.lambdaCodePath`에서 묶는다. 지금은 IaC 레포의 더미(lambda-stub)이고,
  * `-c lambdaCode=backend`로 백엔드 레포 `build/lambda`(백엔드 `scripts/build_lambda.py`로 만든 ARM64 번들, 백엔드 PR #40)로 바꾼다.
- * 메모리: generate·explain은 512MB(근거는 config.ts의 LAMBDA_MEMORY_MB), sync_prices는 Lambda 기본값(128MB)이다.
+ * 메모리: generate·explain은 512MB, sync_prices는 256MB다. (근거는 config.ts의 LAMBDA_MEMORY_MB)
  * EventBridge 스케줄은 3-6에서 만든다.
  */
 export class Functions extends Construct {
@@ -41,6 +43,14 @@ export class Functions extends Construct {
     const { stage } = config;
 
     const code = Code.fromAsset(config.lambdaCodePath, { exclude: ['__pycache__', '*.pyc'] });
+
+    // Converse 제공자는 모델 ID를 환경 변수로 넘기지 않는다. 백엔드 기본값을 쓴다. (백엔드 PR #57, syd348)
+    // bedrock·mock은 지금처럼 Claude 모델 ID를 넘긴다.
+    const isConverse = config.llmProvider === 'bedrock_converse';
+    const designModelEnv: Record<string, string> = isConverse ? {} : { LLM_MODEL: config.bedrockModelIds.design };
+    const explainModelEnv: Record<string, string> = isConverse
+      ? {}
+      : { LLM_EXPLAIN_MODEL: config.bedrockModelIds.explain };
 
     const createFunction = (
       constructId: string,
@@ -69,7 +79,7 @@ export class Functions extends Construct {
       });
     };
 
-    // 설계 생성: 환경 변수 LLM_PROVIDER, LLM_MODEL
+    // 설계 생성: 환경 변수 LLM_PROVIDER, LLM_MODEL(Converse면 없음), API_DAILY_GENERATION_LIMIT
     // 기한 관련 환경 변수(LLM_GENERATION_DEADLINE_S 등)는 넣지 않는다. 백엔드 기본값을 쓴다. (백엔드 #15)
     //
     // EXPLANATIONS_TABLE은 이름만 넘기고 권한은 주지 않는다.
@@ -85,7 +95,9 @@ export class Functions extends Construct {
         [TABLE_ENV_VARS.prices]: data.prices.tableName,
         [TABLE_ENV_VARS.explanations]: data.explanations.tableName,
         LLM_PROVIDER: config.llmProvider,
-        LLM_MODEL: config.bedrockModelIds.design,
+        ...designModelEnv,
+        // 하루 생성 횟수 제한 (백엔드 #53·#54). mock은 백엔드가 제한하지 않는다.
+        API_DAILY_GENERATION_LIMIT: String(DAILY_GENERATION_LIMIT),
       },
       LAMBDA_MEMORY_MB.generate,
     );
@@ -115,7 +127,7 @@ export class Functions extends Construct {
     // (백엔드 #15에서 syd348 동의, 확정)
     this.generate.configureAsyncInvoke({ retryAttempts: 0 });
 
-    // 노드 설명: 환경 변수 LLM_PROVIDER, LLM_EXPLAIN_MODEL. prices 권한 없음.
+    // 노드 설명: 환경 변수 LLM_PROVIDER, LLM_EXPLAIN_MODEL(Converse면 없음). prices 권한 없음.
     this.explain = createFunction(
       'Explain',
       'explain',
@@ -125,30 +137,53 @@ export class Functions extends Construct {
         [TABLE_ENV_VARS.designs]: data.designs.tableName,
         [TABLE_ENV_VARS.explanations]: data.explanations.tableName,
         LLM_PROVIDER: config.llmProvider,
-        LLM_EXPLAIN_MODEL: config.bedrockModelIds.explain,
+        ...explainModelEnv,
       },
       LAMBDA_MEMORY_MB.explain,
     );
     data.designs.grantReadData(this.explain);
     data.explanations.grantReadWriteData(this.explain);
 
-    // 단가 동기화: prices 쓰기만. LLM 환경 변수 없음. 메모리는 지정하지 않는다(Lambda 기본값 128MB).
+    // 단가 동기화: prices 쓰기만. LLM 환경 변수 없음. 메모리 256MB.
     this.syncPrices = createFunction(
       'SyncPrices',
       'sync-prices',
       LAMBDA_HANDLERS.syncPrices,
       LAMBDA_TIMEOUT_SECONDS.syncPrices,
       { [TABLE_ENV_VARS.prices]: data.prices.tableName },
+      LAMBDA_MEMORY_MB.syncPrices,
     );
     data.prices.grantWriteData(this.syncPrices);
     // Price List API는 리소스 단위 권한을 지원하지 않아 '*'를 쓴다. 호출 리전(us-east-1)은 코드에서 지정한다.
-    // 지금 백엔드(PR #39)는 Price List API를 호출하지 않고 스냅샷만 쓰지만, 나중 연동용으로 이 권한은 그대로 둔다. (IaC PR #8 리뷰)
+    // 백엔드 #56부터 Price List API를 호출한다. 실패하면 스냅샷으로 대신한다(PRICE_FETCHER=snapshot).
     this.syncPrices.addToRolePolicy(
       new PolicyStatement({
         actions: ['pricing:GetProducts', 'pricing:DescribeServices', 'pricing:GetAttributeValues'],
         resources: ['*'],
       }),
     );
+
+    if (isConverse) {
+      // Converse 제공자: `bedrock:InvokeModel`을 함수마다 쓰는 모델 하나에만 허용한다. (백엔드 PR #57, syd348)
+      // generate는 설계 모델(gpt-oss-120b), explain은 설명 모델(nova-pro). 대체 모델(LLM_FALLBACK_MODEL)은 쓰지 않는다.
+      // 파운데이션 모델 ARN에는 계정 ID가 없다: arn:aws:bedrock:{리전}::foundation-model/{모델 ID}
+      const invokeModel = (modelId: string): PolicyStatement =>
+        new PolicyStatement({
+          actions: ['bedrock:InvokeModel'],
+          resources: [
+            Stack.of(this).formatArn({
+              service: 'bedrock',
+              account: '',
+              resource: 'foundation-model',
+              resourceName: modelId,
+              arnFormat: ArnFormat.SLASH_RESOURCE_NAME,
+            }),
+          ],
+        });
+      this.generate.addToRolePolicy(invokeModel(CONVERSE_MODEL_IDS.design));
+      this.explain.addToRolePolicy(invokeModel(CONVERSE_MODEL_IDS.explain));
+      return;
+    }
 
     // Bedrock 호출 권한. generate와 explain에 `bedrock-mantle:CreateInference` 하나만 허용한다. (백엔드 #15 syd348 정정)
     // 백엔드가 bedrock-mantle의 Messages API를 쓰므로 `bedrock:InvokeModel` 계열 권한과

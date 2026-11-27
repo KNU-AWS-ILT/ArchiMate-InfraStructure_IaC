@@ -51,6 +51,26 @@ export const BEDROCK_MODEL_IDS = {
 } as const;
 
 /**
+ * Bedrock Converse 제공자(`-c llmProvider=bedrock_converse`)가 부르는 모델 ID. (백엔드 #15, PR #57)
+ * 배포 계정이 무료 플랜이라 Anthropic(Claude) 모델을 쓸 수 없어서, Claude가 아닌 Bedrock 모델을 쓴다.
+ * 백엔드 기본값과 같다. 환경 변수(LLM_MODEL 등)로 넘기지 않고, IAM 권한(`bedrock:InvokeModel`)의 대상 모델을 좁히는 데만 쓴다.
+ * 백엔드 기본 모델이 바뀌면 여기도 같이 바꾼다.
+ * - 설계: gpt-oss-120b (#15 시험에서 유일하게 통과, 3안 67.8초)
+ * - 노드 설명: nova-pro (4.6초)
+ */
+export const CONVERSE_MODEL_IDS = {
+  design: 'openai.gpt-oss-120b-1:0',
+  explain: 'amazon.nova-pro-v1:0',
+} as const;
+
+/**
+ * 사용자 한 명의 하루 3안 생성 횟수 제한 (generate의 `API_DAILY_GENERATION_LIMIT`, 백엔드 #53·#54).
+ * 백엔드 기본값은 5회이고, 발표·데모 때 팀이 같은 계정으로 여러 번 생성하므로 30회로 둔다.
+ * 실제 모델 호출은 크레딧에서 빠지므로 비용 폭주를 막는 용도다. mock은 백엔드가 제한하지 않는다.
+ */
+export const DAILY_GENERATION_LIMIT = 30;
+
+/**
  * Lambda 진입 함수. 백엔드 #15 확정. 모듈 경로는 `archimate/handlers/*.py`.
  * 더미(lambda-stub)와 백엔드 코드가 같은 모듈 경로를 쓰므로 코드 위치만 바꾸면 된다.
  */
@@ -64,7 +84,7 @@ export const LAMBDA_HANDLERS = {
 export const LAMBDA_TIMEOUT_SECONDS = {
   generate: 180,
   explain: 25,
-  // 백엔드 #15 확정(PR #39): sync_prices는 Price List API를 호출하지 않고 스냅샷을 DynamoDB에 쓰기만 해서 30초면 충분하다.
+  // 백엔드 #15 확정(PR #39): 1차 배포에서 30초로 충분했다. Price List API 연동(#56) 후 첫 실행 시간을 보고 다시 정한다.
   syncPrices: 30,
 } as const;
 
@@ -72,11 +92,13 @@ export const LAMBDA_TIMEOUT_SECONDS = {
  * Lambda 메모리(MB). generate와 explain은 512MB다.
  * 근거: FastAPI, pydantic, anthropic SDK를 불러오기만 해도 약 100MB를 쓴다. Lambda 기본값(128MB)이면
  * 메모리가 부족해 강제 종료되고, 그러면 job이 running 상태로 남는다. (IaC PR #8 리뷰, dev-sohyeon)
- * sync_prices는 스냅샷을 DynamoDB에 쓰기만 해서 Lambda 기본값(128MB)을 그대로 쓴다. 그래서 여기에 넣지 않고 메모리를 지정하지 않는다.
+ * sync_prices는 256MB다. 1차 배포에서 스냅샷 방식만으로 최대 113MB(128MB 중)를 써서,
+ * Price List API 연동(백엔드 #56)까지 고려해 올린다. (백엔드 #15, dev-sohyeon 권고)
  */
 export const LAMBDA_MEMORY_MB = {
   generate: 512,
   explain: 512,
+  syncPrices: 256,
 } as const;
 
 /** 테이블 이름을 Lambda에 넘기는 환경 변수 이름. 백엔드 #15. 각 Lambda에는 필요한 것만 넘긴다. */
@@ -89,11 +111,12 @@ export const TABLE_ENV_VARS = {
 /**
  * LLM 제공자 기본값. 최종 AWS 배포는 Bedrock이다.
  * 개발 중 배포는 `-c llmProvider=mock`으로 바꾼다. (백엔드 #15 syd348)
+ * 무료 플랜 배포 계정(시드니)은 Claude를 쓸 수 없어서 `-c llmProvider=bedrock_converse`로 배포한다. (백엔드 #15, PR #57)
  */
 export const DEFAULT_LLM_PROVIDER = 'bedrock';
 
 /** `-c llmProvider`로 고를 수 있는 값. gemini·anthropic은 API 키 전달 방법이 정해지지 않아 막아 둔다. */
-export const LLM_PROVIDERS = ['bedrock', 'mock'] as const;
+export const LLM_PROVIDERS = ['bedrock', 'bedrock_converse', 'mock'] as const;
 
 /**
  * API Gateway 스테이지 스로틀 (모든 경로·메서드 공통). Bedrock 비용 폭주를 막는 용도다.
@@ -180,7 +203,7 @@ export interface ArchimateConfig {
    * Lambda 코드 폴더(`archimate/` 패키지의 부모). stub이면 `lambda-stub/`, backend이면 `<backendPath>/build/lambda` (배포 전에 백엔드에서 `python scripts/build_lambda.py`로 만든 ARM64 번들, 백엔드 PR #40).
    */
   readonly lambdaCodePath: string;
-  /** LLM 제공자 (`-c llmProvider=bedrock|mock`, 기본 bedrock) */
+  /** LLM 제공자 (`-c llmProvider=bedrock|bedrock_converse|mock`, 기본 bedrock) */
   readonly llmProvider: string;
   /** Cognito 호스팅 로그인 도메인 접두사 (`-c cognitoDomainPrefix=...`, 기본 `archimate-{stage}-knu`) */
   readonly cognitoDomainPrefix: string;

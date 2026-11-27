@@ -25,9 +25,11 @@
 > 요청을 받는 REST API(리전 엔드포인트)와 Lambda 3개를 만듭니다. 모든 라우트는 Lambda 프록시 통합이며, Cognito ID 토큰을 API Gateway에서 먼저 확인합니다.
 > - **설계 생성 `generate`** (제한 시간 180초): `POST /api/v1/designs`를 받으면 jobId를 저장하고, **자기 자신을 비동기로 호출한 뒤 바로 `202 { jobId }`로 응답**합니다. 같은 Lambda가 작업 상태 조회와 운영 절차 조회도 처리합니다. 비동기 호출 재시도는 끕니다. 백엔드 코드가 안에서 재시도하므로, AWS가 다시 실행하면 LLM 호출이 중복되기 때문입니다. **(백엔드 #15에서 확정)**
 > - **노드 설명 `explain`** (제한 시간 25초): `GET .../nodes/{nodeId}/explanation`을 처리합니다. 소형 모델 ID는 환경 변수 `LLM_EXPLAIN_MODEL`로 받습니다.
-> - **단가 동기화 `sync_prices`** (제한 시간 30초, 백엔드 #15 확정): EventBridge가 **매일 한국 시간 03:00(UTC 18:00) (임시값)**에 실행해 단가를 `prices` 테이블에 씁니다. 지금 백엔드(PR #39)는 Price List API를 호출하지 않고 스냅샷을 쓰기만 해서 30초면 충분합니다. Price List API 권한(`pricing:*`)은 나중 연동용으로 남겨 두었습니다.
-> - 공통: Python 3.12, ARM64, 로그 보존 2주(스택을 지우면 로그도 삭제), 메모리는 `generate`·`explain` **512MB**, `sync_prices`는 Lambda 기본값(128MB)입니다. FastAPI·pydantic·anthropic SDK를 불러오기만 해도 약 100MB를 써서, 128MB로는 메모리 부족으로 강제 종료되고 job이 running에 남기 때문입니다. Lambda마다 **필요한 테이블 권한만** 줍니다. (`generate`: designs 읽기·쓰기 + prices 읽기, `explain`: designs 읽기 + explanations 읽기·쓰기, `sync_prices`: prices 쓰기)
+> - **단가 동기화 `sync_prices`** (제한 시간 30초, 백엔드 #15 확정): EventBridge가 **매일 한국 시간 03:00(UTC 18:00) (임시값)**에 실행해 단가를 `prices` 테이블에 씁니다. 백엔드 #56부터 AWS Price List API(us-east-1)에서 단가를 받아 오고, 실패하면 패키지 스냅샷을 씁니다. 그래서 `pricing:GetProducts` 등 권한이 있습니다.
+> - 공통: Python 3.12, ARM64, 로그 보존 2주(스택을 지우면 로그도 삭제), 메모리는 `generate`·`explain` **512MB**, `sync_prices`는 **256MB**입니다(1차 배포에서 스냅샷 방식만으로 113MB/128MB를 써서 Price List API 연동에 대비해 올림, 백엔드 #15). FastAPI·pydantic·anthropic SDK를 불러오기만 해도 약 100MB를 써서, 128MB로는 메모리 부족으로 강제 종료되고 job이 running에 남기 때문입니다. Lambda마다 **필요한 테이블 권한만** 줍니다. (`generate`: designs 읽기·쓰기 + prices 읽기, `explain`: designs 읽기 + explanations 읽기·쓰기, `sync_prices`: prices 쓰기)
 > - Bedrock은 bedrock-mantle의 Messages API로 호출합니다. `generate`와 `explain`에 **`bedrock-mantle:CreateInference` 권한 하나만** 줍니다. 모델 ID는 `anthropic.claude-opus-5-5`(설계), `anthropic.claude-haiku-5-5`(설명)이며, 서울은 Global 엔드포인트라 `global.` 같은 리전 접두사를 붙이지 않습니다. 모델 리소스 ARN 형식이 문서에 없어서 권한 범위는 지금 **모든 모델(`*`)입니다 (임시값)**. ARN 형식을 확인한 뒤 두 모델로 좁히고, 실배포 전에 확인합니다. (백엔드 #15 syd348 정정)
+> - **무료 플랜 배포 계정(시드니)은 Claude를 쓸 수 없어서 `-c llmProvider=bedrock_converse`로 배포합니다** (백엔드 #15, PR #57). 이때는 위 권한 대신 `bedrock:InvokeModel`을 함수마다 모델 하나에만 줍니다. `generate`는 `openai.gpt-oss-120b-1:0`, `explain`은 `amazon.nova-pro-v1:0`의 파운데이션 모델 ARN입니다. 모델 ID 환경 변수(`LLM_MODEL` 등)는 넣지 않고 백엔드 기본값을 씁니다.
+> - `generate`에는 하루 생성 횟수 제한 `API_DAILY_GENERATION_LIMIT=30`을 넣습니다 (백엔드 #53·#54, 사용자별, 데모용). 실제 모델 호출은 크레딧에서 빠져서 비용 폭주를 막는 용도입니다. mock은 제한하지 않습니다.
 > - 스로틀: 모든 경로에 초당 10회, 순간 20회 **(임시값)**. Bedrock 비용이 갑자기 늘지 않게 막는 용도입니다.
 > - CORS는 설정하지 않습니다. 프론트가 같은 주소(CloudFront)의 `/api/v1`만 호출하기 때문입니다.
 > - API Gateway가 직접 보내는 오류(401·403·429·504·그 밖의 4xx·5xx)도 `{ code, message, retryable, requestId }` 형식으로 맞춥니다. 401과 403만 `UNAUTHORIZED`로 구분하고(백엔드 FastAPI와 같은 기준), 504→`LLM_TIMEOUT`, 그 밖의 4xx→`INVALID_REQUEST`는 백엔드 #15에서 확인했습니다.
@@ -202,7 +204,7 @@ npx cdk synth           # CloudFormation 템플릿 생성 (cdk.out/)
 > | `lambdaCode` | Lambda 코드 출처. `stub`(레포 안 더미) 또는 `backend`(백엔드 레포 `build/lambda`) | `stub` |
 > | `backendPath` | 백엔드 레포 경로 | `../ArchiMate-Backend` |
 > | `webAssetPath` | 프론트 정적 내보내기 결과물 경로. `index.html`이 없으면 플레이스홀더를 올림 | `../ArchiMate-Frontend/out` |
-> | `llmProvider` | `bedrock` 또는 `mock` (개발 중 배포는 `mock`) | `bedrock` |
+> | `llmProvider` | `bedrock`(Claude), `bedrock_converse`(Claude가 아닌 Bedrock 모델, 무료 플랜 배포 계정용) 또는 `mock`(고정 3안) | `bedrock` |
 > | `cognitoDomainPrefix` | Cognito 호스팅 로그인 도메인 접두사. 같은 리전에서 유일해야 하고, 소문자·숫자·하이픈 1~63자이며 `aws`·`amazon`·`cognito`는 넣을 수 없음 | `archimate-{stage}-knu` (`demo`이면 `archimate-demo-knu`) |
 
 ### 2. 막바지 AWS 배포 (발표 1주 전)
