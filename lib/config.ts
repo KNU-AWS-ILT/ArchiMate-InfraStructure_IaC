@@ -144,6 +144,9 @@ export const WEB_PLACEHOLDER_PATH = path.resolve(__dirname, '..', 'web-placehold
  */
 export const LOCAL_WEB_URL = 'http://localhost:3000/';
 
+/** 프론트가 Cognito 로그인 후 돌아오는 경로 (IaC #4 HJTN 11-27). 앞에 `/`를 붙이지 않는다(웹 주소가 `/`로 끝난다). */
+export const AUTH_CALLBACK_PATH = 'auth/callback/';
+
 /**
  * Cognito 호스팅 로그인 도메인 접두사의 기본값. 스테이지가 demo이면 `archimate-demo-knu`다.
  * 접두사는 같은 리전의 모든 AWS 계정에서 유일해야 한다. 이미 쓰인 이름이면 배포가 실패하므로 그때
