@@ -164,14 +164,14 @@ describe('메모리', () => {
     expect(memoryOf(EXPLAIN)).toBe(512);
   });
 
-  it('sync_prices는 Lambda 기본값(128MB) 그대로다. 메모리를 지정하지 않는다', () => {
-    expect(memoryOf(SYNC_PRICES)).toBeUndefined();
-    expect(memoryOf(SYNC_PRICES) ?? LAMBDA_DEFAULT_MB).toBe(128);
+  it('sync_prices 256MB (1차 배포 실측 113MB/128MB, Price List API 연동 대비, 백엔드 #15)', () => {
+    expect(memoryOf(SYNC_PRICES)).toBe(256);
   });
 
-  it('generate·explain만 기본값보다 크다', () => {
-    const larger = [GENERATE, EXPLAIN, SYNC_PRICES].filter((name) => (memoryOf(name) ?? LAMBDA_DEFAULT_MB) > LAMBDA_DEFAULT_MB);
-    expect(larger.sort()).toEqual([EXPLAIN, GENERATE].sort());
+  it('세 함수 모두 Lambda 기본값(128MB)보다 크게 지정한다', () => {
+    for (const name of [GENERATE, EXPLAIN, SYNC_PRICES]) {
+      expect(memoryOf(name) ?? LAMBDA_DEFAULT_MB).toBeGreaterThan(LAMBDA_DEFAULT_MB);
+    }
   });
 });
 
@@ -185,7 +185,7 @@ describe('환경 변수', () => {
   it('각 Lambda에는 필요한 환경 변수만 있다', () => {
     // generate의 EXPLANATIONS_TABLE은 백엔드 storage/dynamodb.py가 시작할 때 읽어서 넣는다. (권한은 아래 권한표에서 없음을 확인)
     expect(Object.keys(variables(GENERATE)).sort()).toEqual(
-      ['DESIGNS_TABLE', 'EXPLANATIONS_TABLE', 'LLM_MODEL', 'LLM_PROVIDER', 'PRICES_TABLE'].sort(),
+      ['API_DAILY_GENERATION_LIMIT', 'DESIGNS_TABLE', 'EXPLANATIONS_TABLE', 'LLM_MODEL', 'LLM_PROVIDER', 'PRICES_TABLE'].sort(),
     );
     expect(Object.keys(variables(EXPLAIN)).sort()).toEqual(
       ['DESIGNS_TABLE', 'EXPLANATIONS_TABLE', 'LLM_EXPLAIN_MODEL', 'LLM_PROVIDER'].sort(),
@@ -227,6 +227,18 @@ describe('환경 변수', () => {
       mock.findResources('AWS::Lambda::Function', { Properties: { FunctionName: GENERATE } }),
     )[0] as Json;
     expect(generate.Properties.Environment.Variables.LLM_MODEL).toBe('anthropic.claude-opus-5-5');
+  });
+
+  it('generate에만 하루 생성 횟수 제한 30회가 있다 (백엔드 #53·#54)', () => {
+    expect(variables(GENERATE).API_DAILY_GENERATION_LIMIT).toBe('30');
+    expect(variables(EXPLAIN).API_DAILY_GENERATION_LIMIT).toBeUndefined();
+    expect(variables(SYNC_PRICES).API_DAILY_GENERATION_LIMIT).toBeUndefined();
+  });
+
+  it('AWS_REGION은 넣지 않는다 (Lambda 예약 변수, 백엔드 #15 dev-sohyeon)', () => {
+    for (const name of [GENERATE, EXPLAIN, SYNC_PRICES]) {
+      expect(variables(name).AWS_REGION).toBeUndefined();
+    }
   });
 
   it('기한 환경 변수(LLM_GENERATION_DEADLINE_S 등)는 넣지 않는다 (백엔드 기본값 사용)', () => {
@@ -321,5 +333,61 @@ describe('Bedrock·Price List 권한', () => {
     expect(asList(pricing[0].Action)).toContain('pricing:GetProducts');
     expect(statementsWithAction(GENERATE, 'pricing:')).toHaveLength(0);
     expect(statementsWithAction(EXPLAIN, 'pricing:')).toHaveLength(0);
+  });
+});
+
+describe('-c llmProvider=bedrock_converse (무료 플랜 배포 계정, 백엔드 #15·PR #57)', () => {
+  const converse = synth({ llmProvider: 'bedrock_converse' });
+  const converseJson = converse.toJSON();
+  const fn = (name: string): Json =>
+    Object.values(converse.findResources('AWS::Lambda::Function', { Properties: { FunctionName: name } }))[0] as Json;
+  const vars = (name: string): Json => fn(name).Properties.Environment.Variables;
+  const bedrockOf = (name: string): Json[] => {
+    const roleId = fn(name).Properties.Role['Fn::GetAtt'][0];
+    return Object.values(converseJson.Resources as Json)
+      .filter((r: Json) => r.Type === 'AWS::IAM::Policy' && r.Properties.Roles.some((role: Json) => role.Ref === roleId))
+      .flatMap((p: Json) => p.Properties.PolicyDocument.Statement as Json[])
+      .filter((st: Json) => asList(st.Action).some((a) => a.startsWith('bedrock')));
+  };
+  const arnOf = (statement: Json): string => JSON.stringify(statement.Resource);
+
+  it('generate·explain의 LLM_PROVIDER가 bedrock_converse다', () => {
+    expect(vars(GENERATE).LLM_PROVIDER).toBe('bedrock_converse');
+    expect(vars(EXPLAIN).LLM_PROVIDER).toBe('bedrock_converse');
+  });
+
+  it('모델 ID 환경 변수는 넣지 않는다 (백엔드 기본값 사용, syd348)', () => {
+    for (const key of ['LLM_MODEL', 'LLM_EXPLAIN_MODEL', 'LLM_MAX_OUTPUT_TOKENS', 'LLM_FALLBACK_MODEL']) {
+      expect(vars(GENERATE)[key]).toBeUndefined();
+      expect(vars(EXPLAIN)[key]).toBeUndefined();
+    }
+    expect(vars(GENERATE).API_DAILY_GENERATION_LIMIT).toBe('30');
+  });
+
+  it('generate: gpt-oss-120b 파운데이션 모델 하나에만 bedrock:InvokeModel', () => {
+    const statements = bedrockOf(GENERATE);
+    expect(statements).toHaveLength(1);
+    expect(asList(statements[0].Action)).toEqual(['bedrock:InvokeModel']);
+    expect(arnOf(statements[0])).toContain('::foundation-model/openai.gpt-oss-120b-1:0');
+  });
+
+  it('explain: nova-pro 파운데이션 모델 하나에만 bedrock:InvokeModel', () => {
+    const statements = bedrockOf(EXPLAIN);
+    expect(statements).toHaveLength(1);
+    expect(asList(statements[0].Action)).toEqual(['bedrock:InvokeModel']);
+    expect(arnOf(statements[0])).toContain('::foundation-model/amazon.nova-pro-v1:0');
+  });
+
+  it('bedrock-mantle 권한과 리소스 *는 없다', () => {
+    for (const name of [GENERATE, EXPLAIN]) {
+      for (const statement of bedrockOf(name)) {
+        expect(asList(statement.Action).some((a) => a.startsWith('bedrock-mantle:'))).toBe(false);
+        expect(statement.Resource).not.toBe('*');
+      }
+    }
+  });
+
+  it('sync_prices에는 Bedrock 권한이 없다', () => {
+    expect(bedrockOf(SYNC_PRICES)).toHaveLength(0);
   });
 });

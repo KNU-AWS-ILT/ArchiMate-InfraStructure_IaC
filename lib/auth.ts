@@ -7,7 +7,7 @@ import {
   UserPoolDomain,
 } from 'aws-cdk-lib/aws-cognito';
 import { Construct } from 'constructs';
-import { ArchimateConfig, LOCAL_WEB_URL, resourceName } from './config';
+import { ArchimateConfig, AUTH_CALLBACK_PATH, LOCAL_WEB_URL, resourceName } from './config';
 
 export interface AuthProps {
   readonly config: ArchimateConfig;
@@ -21,7 +21,9 @@ export interface AuthProps {
  *  - 로그인 아이디: 이메일만. 직접 가입 없음. 팀 계정 1개는 배포 후 CLI로 만든다 (README 참고).
  *    계정을 CDK로 만들지 않는 이유: 비밀번호가 CloudFormation 템플릿에 남기 때문이다.
  *  - 앱 클라이언트: 시크릿 없음, Authorization code grant만(implicit 끔), 범위 openid·email·profile, IdP는 Cognito만.
- *  - 돌아올 주소(callback)와 로그아웃 주소(logout): 로컬(http://localhost:3000/)과 CloudFront 주소 둘 다.
+ *  - 돌아올 주소(callback): 로컬(http://localhost:3000)과 CloudFront 주소의 `/auth/callback/` (IaC #4 HJTN 11-27).
+ *    처음 등록한 `/`도 남겨 둔다 (1차 배포 로그인 확인에 쓴 주소).
+ *  - 로그아웃 주소(logout): 로컬과 CloudFront 주소의 `/`.
  *
  * 만드는 순서(순환 참조를 피하려고):
  *  API Gateway의 Authorizer는 User Pool만 쓰고, CloudFront는 API Gateway를 쓰고, 앱 클라이언트는 CloudFront 주소를 쓴다.
@@ -81,7 +83,8 @@ export class Auth extends Construct {
     if (this.client) {
       throw new Error('앱 클라이언트는 한 번만 만들 수 있습니다.');
     }
-    const redirectUrls = [LOCAL_WEB_URL, `https://${cloudFrontDomainName}/`];
+    const webUrls = [LOCAL_WEB_URL, `https://${cloudFrontDomainName}/`];
+    const callbackUrls = [...webUrls, ...webUrls.map((url) => `${url}${AUTH_CALLBACK_PATH}`)];
 
     this.client = new UserPoolClient(this, 'UserPoolClient', {
       userPool: this.userPool,
@@ -92,8 +95,8 @@ export class Auth extends Construct {
         // Authorization code grant만 쓴다. implicit은 끈다.
         flows: { authorizationCodeGrant: true, implicitCodeGrant: false },
         scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
-        callbackUrls: redirectUrls,
-        logoutUrls: redirectUrls,
+        callbackUrls,
+        logoutUrls: webUrls,
       },
       // 로그인 제공자는 Cognito(이메일·비밀번호)뿐이다.
       supportedIdentityProviders: [UserPoolClientIdentityProvider.COGNITO],

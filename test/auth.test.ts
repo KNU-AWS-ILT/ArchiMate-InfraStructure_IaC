@@ -119,11 +119,18 @@ describe('Cognito 앱 클라이언트', () => {
     expect(client.Properties.SupportedIdentityProviders).toEqual(['COGNITO']);
   });
 
-  it('callback과 logout 주소는 같고, 로컬과 CloudFront 주소 둘 다다', () => {
-    const cloudFront = { 'Fn::Join': ['', ['https://', { 'Fn::GetAtt': [distributionId, 'DomainName'] }, '/']] };
+  it('callback은 로컬·CloudFront의 / 와 /auth/callback/, logout은 로컬·CloudFront의 / 다 (IaC #4 HJTN)', () => {
+    const cloudFront = (suffix: string) => ({
+      'Fn::Join': ['', ['https://', { 'Fn::GetAtt': [distributionId, 'DomainName'] }, `/${suffix}`]],
+    });
     expect(LOCAL_WEB_URL).toBe('http://localhost:3000/');
-    expect(client.Properties.CallbackURLs).toEqual([LOCAL_WEB_URL, cloudFront]);
-    expect(client.Properties.LogoutURLs).toEqual([LOCAL_WEB_URL, cloudFront]);
+    expect(client.Properties.CallbackURLs).toEqual([
+      LOCAL_WEB_URL,
+      cloudFront(''),
+      'http://localhost:3000/auth/callback/',
+      cloudFront('auth/callback/'),
+    ]);
+    expect(client.Properties.LogoutURLs).toEqual([LOCAL_WEB_URL, cloudFront('')]);
   });
 
   it('CloudFront 주소는 같은 스택의 배포를 참조한다 (순환 참조 없이 합성됨)', () => {

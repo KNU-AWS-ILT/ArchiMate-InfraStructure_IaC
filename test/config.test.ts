@@ -15,7 +15,7 @@ describe('resourceName', () => {
 });
 
 describe('loadConfig', () => {
-  it('기본 스테이지는 demo, 리전은 서울이다', () => {
+  it('기본 스테이지는 demo, 리전은 시드니다', () => {
     const config = loadConfig(new App());
     expect(config.stage).toBe('demo');
     expect(config.region).toBe('ap-southeast-2');
@@ -35,7 +35,11 @@ describe('loadConfig', () => {
     expect(loadConfig(new App({ context: { llmProvider: 'mock' } })).llmProvider).toBe('mock');
   });
 
-  it('llmProvider에 bedrock·mock 외의 값은 거부한다', () => {
+  it('-c llmProvider=bedrock_converse로 바꿀 수 있다 (백엔드 PR #57)', () => {
+    expect(loadConfig(new App({ context: { llmProvider: 'bedrock_converse' } })).llmProvider).toBe('bedrock_converse');
+  });
+
+  it('llmProvider에 bedrock·bedrock_converse·mock 외의 값은 거부한다', () => {
     expect(() => loadConfig(new App({ context: { llmProvider: 'gemini' } }))).toThrow();
   });
 
